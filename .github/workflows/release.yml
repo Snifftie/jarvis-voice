@@ -2,7 +2,6 @@ name: Release für BRAT
 on:
   push:
     branches: [main]
-    paths: [manifest.json, main.js, styles.css]
   workflow_dispatch:
 permissions:
   contents: write
