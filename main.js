@@ -12,7 +12,7 @@ AKTION: notiz | <Text>   (Notiz/Erinnerung in den Eingang)
 AKTION: idee | <Text>    (Idee in den Ideen-Ordner)
 AKTION: fokus | <A>; <B>; <C>   (ersetzt „Heute im Fokus“, höchstens 3 kurze Aufgaben)
 AKTION: termin | <Titel> | <Start JJJJ-MM-TTTHH:MM oder JJJJ-MM-TT für ganztägig> | <Dauer in Minuten, Standard 60>   (Google Kalender)
-Termine mit Datum/Uhrzeit immer per AKTION termin eintragen; rechne Wochentage vom heutigen Datum aus; fehlt die Uhrzeit, frag nach. Alex' Termine stehen in der Notiz 00-Cockpit/Kalender.md.
+WICHTIG: Nennt Alex ein Datum oder einen Wochentag zusammen mit einem Vorhaben (z. B. „30.11. Pokern bei Marco, 11.30“, „Mittwoch Zahnarzt 10 Uhr“), ist das IMMER ein Termin → AKTION termin, nicht notiz. Zusatzinfos (z. B. „Pizza mitbringen“) gehören in den Titel. Termine mit Datum/Uhrzeit immer per AKTION termin eintragen; rechne Wochentage vom heutigen Datum aus; fehlt die Uhrzeit, frag nach. Alex' Termine stehen in der Notiz 00-Cockpit/Kalender.md.
 Nutze AKTION, wenn Alex etwas plant, sich vornimmt, notieren oder merken will. Übernimm nur, was Alex selbst gesagt hat. Die AKTION-Zeilen werden nicht vorgelesen; sag davor kurz, was du festgehalten hast.
 Die Frage kommt oft aus der Spracherkennung und kann Hörfehler enthalten. Korrigiere offensichtliche Fehler anhand der Notizen und der Fachwörter, bevor du antwortest oder etwas notierst (z. B. „Cloud Quote ABI“ = „Claude Code API“, „Bio Office“ = „BioOffice“). Speichere Notizen immer in der korrigierten Schreibweise. Ist etwas wirklich unklar, frag kurz nach.
 Keine Kauf-/Verkaufsempfehlungen beim Trading.`;
@@ -135,7 +135,7 @@ module.exports = class JarvisVoice extends Plugin {
       let text = r.text.replace(/^\s*AKTION:.*$/gim, "").trim(); const done = [];
       for (const [w, t] of akts) { try { await this.aktion(w, t); done.push(w === "termin" ? "📅 Termin geht in ~2 Min. in deinen Kalender" : w === "fokus" ? "🎯 Fokus gesetzt" : w === "idee" ? "💡 Idee gespeichert" : "📥 Notiz im Eingang"); } catch (e) { done.push("⚠️ " + e.message); } }
       this.hist.push({ q, a: text || "(festgehalten)", t: Date.now() }); if (this.hist.length > 8) this.hist.shift();
-      this.ui(r.via + (done.length ? " · " + done.join(" · ") : ""), "„" + q + "“\n\n" + (text || done.join("\n")), false);
+      this.ui("v" + this.manifest.version + " · " + r.via + (done.length ? " · " + done.join(" · ") : ""), "„" + q + "“\n\n" + (text || done.join("\n")), false);
       if (ton && this.cfg.ton && text) await this.sprich(text);
     } catch (e) { this.ui("⚠️ " + e.message, null, false); }
   }
