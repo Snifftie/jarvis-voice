@@ -12,6 +12,7 @@ AKTION: notiz | <Text>   (Notiz/Erinnerung in den Eingang)
 AKTION: idee | <Text>    (Idee in den Ideen-Ordner)
 AKTION: fokus | <A>; <B>; <C>   (ersetzt „Heute im Fokus“, höchstens 3 kurze Aufgaben)
 Nutze AKTION, wenn Alex etwas plant, sich vornimmt, notieren oder merken will. Übernimm nur, was Alex selbst gesagt hat. Die AKTION-Zeilen werden nicht vorgelesen; sag davor kurz, was du festgehalten hast.
+Die Frage kommt oft aus der Spracherkennung und kann Hörfehler enthalten. Korrigiere offensichtliche Fehler anhand der Notizen und der Fachwörter, bevor du antwortest oder etwas notierst (z. B. „Cloud Quote ABI“ = „Claude Code API“, „Bio Office“ = „BioOffice“). Speichere Notizen immer in der korrigierten Schreibweise. Ist etwas wirklich unklar, frag kurz nach.
 Keine Kauf-/Verkaufsempfehlungen beim Trading.`;
 
 function stamp() { const d = new Date(); const p = n => String(n).padStart(2, "0"); return `${p(d.getDate())}.${p(d.getMonth() + 1)}. ${p(d.getHours())}:${p(d.getMinutes())}`; }
@@ -64,10 +65,10 @@ module.exports = class JarvisVoice extends Plugin {
     if (this.rec) return this.rec.stop();
     if (!this.cfg.groq) { new Notice("Jarvis: Groq-Schlüssel fehlt (Einstellungen → Jarvis Voice)"); return this.ui("Groq-Schlüssel fehlt – Einstellungen → Jarvis Voice"); }
     this.stopAudio();
-    let stream; try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+    let stream; try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } }); }
     catch (e) { return this.ui("⚠️ Kein Mikrofon-Zugriff: " + e.message + " – in den Android-Einstellungen Obsidian das Mikrofon erlauben."); }
     const mime = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"].find(m => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || "";
-    const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined), chunks = [];
+    const rec = new MediaRecorder(stream, Object.assign({ audioBitsPerSecond: 64000 }, mime ? { mimeType: mime } : {})), chunks = [];
     rec.ondataavailable = e => e.data && e.data.size && chunks.push(e.data);
     rec.onstop = async () => {
       stream.getTracks().forEach(t => t.stop()); this.rec = null; clearTimeout(this.recT);
