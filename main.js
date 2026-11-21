@@ -3,7 +3,7 @@
    Schlüssel liegen nur auf diesem Gerät (App-Speicher), nicht im Tresor und nicht auf GitHub. */
 const { Plugin, PluginSettingTab, Setting, Notice, requestUrl } = require("obsidian");
 const KEYS = ["groq", "claude", "gemini"];
-const DEF = { groq: "", claude: "", gemini: "", stimme: "Sulafat", ton: true, ttsModel: "gemini-3.1-flash-tts-preview" };
+const DEF = { woerter: "", groq: "", claude: "", gemini: "", stimme: "Sulafat", ton: true, ttsModel: "gemini-3.1-flash-tts-preview" };
 const STIMMEN = ["Sulafat", "Kore", "Puck", "Charon", "Fenrir", "Aoede", "Leda", "Orus", "Zephyr", "Enceladus"];
 const SYS = `Du bist JARVIS, der persönliche Assistent von Alex. Du antwortest gesprochen, also natürlich, locker und kurz (meist 1–4 Sätze, keine Listen, keine Tabellen, keine Emojis, keine Überschriften). Deutsch, Du-Form.
 Grundlage ist Alex' Wissensspeicher (Notizen unten). Erfinde keine Fakten, Termine, Zahlen oder Aufgaben. Steht etwas nicht in den Notizen, sag das kurz.
@@ -83,7 +83,7 @@ module.exports = class JarvisVoice extends Plugin {
 
   async stt(blob) {
     const ext = blob.type.includes("mp4") ? "m4a" : blob.type.includes("ogg") ? "ogg" : "webm";
-    const mp = multipart({ model: "whisper-large-v3", language: "de", temperature: "0", response_format: "json", prompt: "Deutsch. Alex spricht mit Jarvis über Bioladen, BioOffice, Trading, Websites, Iggesen, Wetter, Fokus, Notiz, Idee." }, { name: "sprache." + ext, type: blob.type.split(";")[0], data: await blob.arrayBuffer() });
+    const mp = multipart({ model: "whisper-large-v3", language: "de", temperature: "0", response_format: "json", prompt: "Deutsch. Häufige Wörter: Claude, Claude Code, API, API-Schlüssel, Anthropic, Groq, Gemini, Mistral, Obsidian, GitHub, Telegram, Jarvis, Cockpit, BioOffice, Bioladen, Weiling, Shelly, Hyperliquid, Kraken, Trading, MMBM, C2-Bot, TRADEWOOOW, Iggesen, Athen, Kosak, Marklohe, Nienburg, Fokus, Notiz, Idee, Eingang" + (this.cfg.woerter ? ", " + this.cfg.woerter : "") + "." }, { name: "sprache." + ext, type: blob.type.split(";")[0], data: await blob.arrayBuffer() });
     const r = await requestUrl({ url: "https://api.groq.com/openai/v1/audio/transcriptions", method: "POST", headers: { Authorization: "Bearer " + this.cfg.groq }, body: mp.body, contentType: mp.contentType, throw: false });
     if (r.status >= 300) throw new Error("Spracherkennung (Groq " + r.status + "): " + ((r.json && r.json.error && r.json.error.message) || r.text || "").slice(0, 120));
     return String(r.json.text || "").trim();
@@ -182,6 +182,7 @@ class JVSettings extends PluginSettingTab {
     key("gemini", "Gemini-Schlüssel (für die Stimme)", "Natürliche Stimme · aistudio.google.com → Get API key");
     new Setting(c).setName("Stimme").setDesc("Gemini-Stimme").addDropdown(d => { STIMMEN.forEach(s => d.addOption(s, s)); d.setValue(p.cfg.stimme).onChange(v => { p.cfg.stimme = v; p.save(); }); })
       .addButton(b => b.setButtonText("Test").onClick(() => p.sprich("Hallo Alex, so klinge ich.")));
+    new Setting(c).setName("Eigene Wörter").setDesc("Namen und Fachwörter, die Jarvis oft falsch versteht – mit Komma getrennt").addTextArea(t => t.setPlaceholder("z. B. Dani, Elkershausen, VitaBalance").setValue(p.cfg.woerter).onChange(v => { p.cfg.woerter = v.trim(); p.save(); }));
     new Setting(c).setName("Antwort vorlesen").addToggle(t => t.setValue(p.cfg.ton).onChange(v => { p.cfg.ton = v; p.save(); }));
   }
 }
