@@ -83,7 +83,7 @@ module.exports = class JarvisVoice extends Plugin {
 
   async stt(blob) {
     const ext = blob.type.includes("mp4") ? "m4a" : blob.type.includes("ogg") ? "ogg" : "webm";
-    const mp = multipart({ model: "whisper-large-v3-turbo", language: "de", response_format: "json" }, { name: "sprache." + ext, type: blob.type.split(";")[0], data: await blob.arrayBuffer() });
+    const mp = multipart({ model: "whisper-large-v3", language: "de", temperature: "0", response_format: "json", prompt: "Deutsch. Alex spricht mit Jarvis über Bioladen, BioOffice, Trading, Websites, Iggesen, Wetter, Fokus, Notiz, Idee." }, { name: "sprache." + ext, type: blob.type.split(";")[0], data: await blob.arrayBuffer() });
     const r = await requestUrl({ url: "https://api.groq.com/openai/v1/audio/transcriptions", method: "POST", headers: { Authorization: "Bearer " + this.cfg.groq }, body: mp.body, contentType: mp.contentType, throw: false });
     if (r.status >= 300) throw new Error("Spracherkennung (Groq " + r.status + "): " + ((r.json && r.json.error && r.json.error.message) || r.text || "").slice(0, 120));
     return String(r.json.text || "").trim();
@@ -96,8 +96,17 @@ module.exports = class JarvisVoice extends Plugin {
     return out.slice(0, max);
   }
 
+  async wetter() {
+    const C = { 0: "klar", 1: "überwiegend klar", 2: "teils bewölkt", 3: "bedeckt", 45: "Nebel", 48: "Reifnebel", 51: "Niesel", 53: "Niesel", 55: "Niesel", 61: "leichter Regen", 63: "Regen", 65: "starker Regen", 71: "leichter Schnee", 73: "Schnee", 75: "starker Schnee", 80: "Regenschauer", 81: "Regenschauer", 82: "heftige Schauer", 85: "Schneeschauer", 86: "Schneeschauer", 95: "Gewitter", 96: "Gewitter mit Hagel", 99: "Gewitter mit Hagel" };
+    const r = await requestUrl({ url: "https://api.open-meteo.com/v1/forecast?latitude=52.68&longitude=9.14&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Europe%2FBerlin&forecast_days=3" });
+    const c = r.json.current, d = r.json.daily, t = ["Heute", "Morgen", "Übermorgen"];
+    return `Wetter Marklohe (Open-Meteo): jetzt ${Math.round(c.temperature_2m)} °C, gefühlt ${Math.round(c.apparent_temperature)} °C, ${C[c.weather_code] || "?"}, Wind ${Math.round(c.wind_speed_10m)} km/h.\n` +
+      d.time.map((_, i) => `${t[i]}: ${Math.round(d.temperature_2m_min[i])} bis ${Math.round(d.temperature_2m_max[i])} °C, ${C[d.weather_code[i]] || "?"}, Regenrisiko ${d.precipitation_probability_max[i]} %`).join("\n");
+  }
+
   async ki(q) {
-    const ctx = await this.kontext(), sys = SYS + `\n\nHeute: ${heute()}.\nWissensspeicher:${ctx}`;
+    let wx = ""; if (/wetter|regen|schnee|sonne|temperatur|grad|warm|kalt|frost|glatt|wind|jacke|schirm|draußen/i.test(q)) { try { wx = "\n\n" + await this.wetter(); } catch (e) { wx = "\n\nWetterdienst gerade nicht erreichbar."; } }
+    const ctx = await this.kontext(), sys = SYS + `\n\nHeute: ${heute()}.${wx}\nWissensspeicher:${ctx}`;
     const verlauf = this.hist.filter(h => Date.now() - h.t < 30 * 60e3).slice(-4).flatMap(h => [{ role: "user", content: h.q }, { role: "assistant", content: h.a }]);
     const msgs = [...verlauf, { role: "user", content: q }];
     if (this.cfg.claude) {
