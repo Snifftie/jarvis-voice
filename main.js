@@ -109,22 +109,33 @@ module.exports = class JarvisVoice extends Plugin {
 
   async ki(q) {
     let wx = ""; if (/wetter|regen|schnee|sonne|temperatur|grad|warm|kalt|frost|glatt|wind|jacke|schirm|draußen/i.test(q)) { try { wx = "\n\n" + await this.wetter(); } catch (e) { wx = "\n\nWetterdienst gerade nicht erreichbar."; } }
-    const ctx = await this.kontext(), sys = SYS + `\n\nHeute: ${heute()}.${wx}\nWissensspeicher:${ctx}`;
+    const baue = async max => SYS + `\n\nHeute: ${heute()}.${wx}\nWissensspeicher:${await this.kontext(max)}`;
     const verlauf = this.hist.filter(h => Date.now() - h.t < 30 * 60e3).slice(-4).flatMap(h => [{ role: "user", content: h.q }, { role: "assistant", content: h.a }]);
-    const msgs = [...verlauf, { role: "user", content: q }];
+    const msgs = [...verlauf, { role: "user", content: q }], fehler = [];
     if (this.cfg.claude) {
       const r = await requestUrl({ url: "https://api.anthropic.com/v1/messages", method: "POST", contentType: "application/json", throw: false,
         headers: { "x-api-key": this.cfg.claude, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-        body: JSON.stringify({ model: "claude-sonnet-5-5", max_tokens: 600, system: sys, messages: msgs, temperature: 0.4 }) });
+        body: JSON.stringify({ model: "claude-sonnet-5-5", max_tokens: 600, system: await baue(24000), messages: msgs, temperature: 0.4 }) });
       if (r.status < 300) return { text: r.json.content.filter(x => x.type === "text").map(x => x.text).join("").trim(), via: "Claude" };
-      new Notice("Claude-Fehler " + r.status + " – nehme Groq");
+      fehler.push("Claude " + r.status); new Notice("Claude-Fehler " + r.status + " – nehme Groq");
     }
-    for (const model of ["openai/gpt-oss-120b", "llama-3.3-70b-versatile"]) {
-      const r = await requestUrl({ url: "https://api.groq.com/openai/v1/chat/completions", method: "POST", contentType: "application/json", throw: false,
-        headers: { Authorization: "Bearer " + this.cfg.groq }, body: JSON.stringify({ model, messages: [{ role: "system", content: sys }, ...msgs], max_tokens: 700, temperature: 0.4 }) });
-      if (r.status < 300) { const t = String(r.json.choices[0].message.content || "").replace(/<think>[\s\S]*?<\/think>/gi, "").trim(); if (t) return { text: t, via: "Groq " + model.split("/").pop() }; }
+    if (!this.cfg.groq) throw new Error("Groq-Schlüssel fehlt (Einstellungen → Jarvis Voice).");
+    // Gratis-Stufe von Groq begrenzt Token pro Minute: zu viel Kontext → 413/429. Dann mit weniger Notizen nochmal.
+    for (const max of [14000, 6000, 2500]) {
+      const sys = await baue(max); let zuGross = false;
+      for (const model of ["openai/gpt-oss-120b", "qwen/qwen3.8-27b", "openai/gpt-oss-20b", "llama-3.3-70b-versatile"]) {
+        let r; try { r = await requestUrl({ url: "https://api.groq.com/openai/v1/chat/completions", method: "POST", contentType: "application/json", throw: false,
+          headers: { Authorization: "Bearer " + this.cfg.groq }, body: JSON.stringify({ model, messages: [{ role: "system", content: sys }, ...msgs], max_tokens: 700, temperature: 0.4 }) }); }
+        catch (e) { fehler.push(model.split("/").pop() + ": " + e.message); continue; }
+        let j = null; try { j = r.json; } catch (e) {}
+        if (r.status < 300) { const t = String(j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content || "").replace(/<think>[\s\S]*?<\/think>/gi, "").trim(); if (t) return { text: t, via: "Groq " + model.split("/").pop() }; fehler.push(model.split("/").pop() + ": leer"); continue; }
+        const m = String(j && j.error && j.error.message || ""); fehler.push(model.split("/").pop() + " " + r.status);
+        if (r.status === 401) throw new Error("Groq-Schlüssel ungültig (401) – in den Einstellungen neu eintragen.");
+        if (r.status === 413 || /too large|tokens per minute|TPM|context/i.test(m)) { zuGross = true; break; }
+      }
+      if (!zuGross) break;
     }
-    throw new Error("Keine KI erreichbar (Groq/Claude).");
+    throw new Error("Keine KI erreichbar (" + fehler.slice(-4).join(", ") + ").");
   }
 
   async ask(q, ton) {
