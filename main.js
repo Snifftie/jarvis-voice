@@ -162,8 +162,8 @@ module.exports = class JarvisVoice extends Plugin {
       const items = (m ? t.slice(m[0].length) : t).split(/\s*;\s*/).map(x => x.trim()).filter(Boolean).slice(0, 5); if (!items.length) throw new Error("Fokus ohne Aufgaben");
       const d = new Date(); d.setDate(d.getDate() + off); const p2 = n => String(n).padStart(2, "0"), k = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
       // Block mit diesem Datum ersetzen; gibt es ihn (noch) nicht, legt das Plugin einen [!fokus|neu …]-Block an – der Telegram-Jarvis sortiert ihn in ~2 Min. ein.
-      return v.process(f, s => { const L = s.split("\n"), i = L.findIndex(l => new RegExp("^>\\s*\\[!fokus\\|\\w+\\s+" + k + "\\]").test(l));
-        if (i >= 0) { let b = i + 1; while (b < L.length && /^>/.test(L[b])) b++; const z = items.map(x => "> - [ ] " + x); while (z.length < 2) z.push("> - [ ] "); L.splice(i + 1, b - i - 1, ...z); return L.join("\n"); }
+      return v.process(f, s => { const L = s.split("\n"), i = L.findIndex(l => new RegExp("^>\\s*\\[!fokus\\|\\w+\\s+" + k + "\\]").test(l) || l.startsWith(">") && l.includes("%%fokus " + k + "%%"));
+        if (i >= 0) { let b = i + 1; while (b < L.length && /^>\s*- \[[ xX]\]/.test(L[b])) b++; const termine = L.slice(i + 1, b).filter(l => l.includes("📅")), z = items.map(x => "> - [ ] " + x); while (z.length < 2) z.push("> - [ ] "); L.splice(i + 1, b - i - 1, ...termine, ...z); return L.join("\n"); }
         const h = L.findIndex(l => /^##\s.*Fokus/i.test(l)); if (h < 0) throw new Error("Fokus-Abschnitt fehlt in Start.md");
         L.splice(h + 1, 0, `> [!fokus|neu ${k}] Neu · ${d.getDate()}.${d.getMonth() + 1}.`, ...items.map(x => "> - [ ] " + x), ""); return L.join("\n"); });
     }
