@@ -14,7 +14,7 @@ AKTION: fokus | <heute|morgen|übermorgen> | <A>; <B>; <C>   (ersetzt den Fokus 
 AKTION: termin | <Titel> | <Start JJJJ-MM-TTTHH:MM oder JJJJ-MM-TT für ganztägig> | <Dauer in Minuten, Standard 60>   (Google Kalender)
 AKTION: erinnerung | <JJJJ-MM-TTTHH:MM> | <Text>   (Jarvis meldet sich genau dann in Telegram – Pop-up und Vibration)
 AKTION: buch | <Titel – Autor (falls genannt)>   (Buchwunsch auf die Liste Buchwünsche)
-„Buchwunsch …“, „das Buch will ich lesen …“ ist IMMER AKTION buch (nicht notiz), ein Buch pro Zeile.
+„Buchwunsch …“, „das Buch will ich lesen …“ ist IMMER AKTION buch (nicht notiz), ein Buch pro Zeile. Das Buch wird danach in einer Bücher-Datenbank geprüft – sag NICHT, dass es eingetragen ist, sondern dass du es prüfst und die Antwort in Telegram kommt.
 „Erinnere mich …“, „sag mir Bescheid …“ mit Zeitpunkt ist IMMER AKTION erinnerung (nicht notiz), eine Zeile pro Zeitpunkt. Ist die Uhrzeit unklar (z. B. 4:15 nachts statt 14:15), frag nach. Will Alex an einen Termin erinnert werden: Termin eintragen UND Erinnerung setzen.
 WICHTIG: Nennt Alex ein Datum oder einen Wochentag zusammen mit einem Vorhaben (z. B. „30.11. Pokern bei Marco, 11.30“, „Mittwoch Zahnarzt 10 Uhr“), ist das IMMER ein Termin → AKTION termin, nicht notiz. Zusatzinfos (z. B. „Pizza mitbringen“) gehören in den Titel. Termine mit Datum/Uhrzeit immer per AKTION termin eintragen; rechne Wochentage vom heutigen Datum aus; fehlt die Uhrzeit, frag nach. Alex' Termine stehen in der Notiz 00-Cockpit/Kalender.md.
 Nutze AKTION, wenn Alex etwas plant, sich vornimmt, notieren oder merken will. Übernimm nur, was Alex selbst gesagt hat. Die AKTION-Zeilen werden nicht vorgelesen; sag davor kurz, was du festgehalten hast.
@@ -153,7 +153,7 @@ module.exports = class JarvisVoice extends Plugin {
       const r = await this.ki(q);
       const akts = [...r.text.matchAll(/^\s*AKTION:\s*(notiz|idee|fokus|termin|erinnerung|buch)\s*\|\s*(.+)$/gim)].map(m => [m[1].toLowerCase(), m[2].trim()]);
       let text = r.text.replace(/^\s*AKTION:.*$/gim, "").trim(); const done = [];
-      for (const [w, t] of akts) { try { await this.aktion(w, t); done.push(w === "buch" ? "📚 Buchwunsch gespeichert" : w === "erinnerung" ? "⏰ Erinnerung kommt per Telegram" : w === "termin" ? "📅 Termin geht in ~2 Min. in deinen Kalender" : w === "fokus" ? "🎯 Fokus gesetzt" : w === "idee" ? "💡 Idee gespeichert" : "📥 Notiz im Eingang"); } catch (e) { done.push("⚠️ " + e.message); } }
+      for (const [w, t] of akts) { try { await this.aktion(w, t); done.push(w === "buch" ? "📚 Buch wird geprüft – Antwort kommt in Telegram" : w === "erinnerung" ? "⏰ Erinnerung kommt per Telegram" : w === "termin" ? "📅 Termin geht in ~2 Min. in deinen Kalender" : w === "fokus" ? "🎯 Fokus gesetzt" : w === "idee" ? "💡 Idee gespeichert" : "📥 Notiz im Eingang"); } catch (e) { done.push("⚠️ " + e.message); } }
       this.hist.push({ q, a: text || "(festgehalten)", t: Date.now() }); if (this.hist.length > 8) this.hist.shift();
       this.ui("v" + this.manifest.version + " · " + r.via + (done.length ? " · " + done.join(" · ") : ""), "„" + q + "“\n\n" + (text || done.join("\n")), false);
       if (ton && this.cfg.ton && text) await this.sprich(text);
@@ -172,12 +172,10 @@ module.exports = class JarvisVoice extends Plugin {
         const termine = L.slice(h + 1, b).filter(l => l.includes("📅")); L.splice(h + 1, b - h - 1, ...termine, ...neu); return L; });
     }
     if (w === "buch") {
+      // Buchwünsche prüft der Telegram-Jarvis (Bücher-Datenbank); Rückfrage und Bestätigung kommen dort
       const txt = t.replace(/\s+/g, " ").trim(); if (!txt) throw new Error("Buch ohne Titel");
-      const p = "50-Privat/Buchwünsche.md", bf = v.getAbstractFileByPath(p) || await v.create(p, "# 📚 Buchwünsche\n\n## Wunschliste\n\n## Gelesen\n");
-      return v.process(bf, s => { const L = s.split("\n"); let h = L.findIndex(l => /^##\s+Wunschliste/i.test(l)); if (h < 0) { L.push("", "## Wunschliste"); h = L.length - 1; }
-        let b = h + 1; while (b < L.length && !/^#/.test(L[b])) b++; const teil = L.slice(h + 1, b).filter(l => !/^\s*- \[ \]\s*$/.test(l));
-        if (teil.some(l => l.replace(/^\s*- \[[ xX]\]\s*/, "").trim().toLowerCase() === txt.toLowerCase())) return s;
-        let z = teil.length; while (z > 0 && !teil[z - 1].trim()) z--; teil.splice(z, 0, "- [ ] " + txt); if (teil[teil.length - 1] !== "") teil.push(""); L.splice(h + 1, b - h - 1, ...teil); return L.join("\n"); });
+      const p = "50-Privat/Buchwünsche-neu.md", bf = v.getAbstractFileByPath(p);
+      return bf ? v.process(bf, s => s.replace(/\n*$/, "\n") + "- " + txt + "\n") : v.create(p, "# Buchwunsch-Warteschlange\n\nDer Telegram-Jarvis prüft diese Titel und trägt sie in die Buchwünsche ein.\n\n- " + txt + "\n");
     }
     if (w === "erinnerung") {
       if (!/^\s*\d{4}-\d{2}-\d{2}T\d{2}:\d{2}\s*\|\s*\S/.test(t)) throw new Error("Erinnerung ohne Zeitpunkt");
