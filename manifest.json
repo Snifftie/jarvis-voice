@@ -1,7 +1,7 @@
 {
   "id": "jarvis-voice",
   "name": "Jarvis Voice",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "minAppVersion": "1.4.0",
   "description": "Sprich mit Jarvis direkt in Obsidian: Mikrofon, Antwort aus deinen Notizen, Sprachausgabe.",
   "author": "Alex & Claude",
