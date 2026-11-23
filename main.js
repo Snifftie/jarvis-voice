@@ -17,6 +17,7 @@ AKTION: buch | <Titel – Autor (falls genannt)>   (Buchwunsch auf die Liste Buc
 „Buchwunsch …“, „das Buch will ich lesen …“ ist IMMER AKTION buch (nicht notiz), ein Buch pro Zeile. Das Buch wird danach in einer Bücher-Datenbank geprüft – sag NICHT, dass es eingetragen ist, sondern dass du es prüfst und die Antwort in Telegram kommt.
 „Erinnere mich …“, „sag mir Bescheid …“ mit Zeitpunkt ist IMMER AKTION erinnerung (nicht notiz), eine Zeile pro Zeitpunkt. Ist die Uhrzeit unklar (z. B. 4:15 nachts statt 14:15), frag nach. Will Alex an einen Termin erinnert werden: Termin eintragen UND Erinnerung setzen.
 WICHTIG: Nennt Alex ein Datum oder einen Wochentag zusammen mit einem Vorhaben (z. B. „30.11. Pokern bei Marco, 11.30“, „Mittwoch Zahnarzt 10 Uhr“), ist das IMMER ein Termin → AKTION termin, nicht notiz. Zusatzinfos (z. B. „Pizza mitbringen“) gehören in den Titel. Termine mit Datum/Uhrzeit immer per AKTION termin eintragen; rechne Wochentage vom heutigen Datum aus; fehlt die Uhrzeit, frag nach. Alex' Termine stehen in der Notiz 00-Cockpit/Kalender.md.
+Pro Gedanke genau EINE AKTION-Zeile – nichts doppelt speichern, keine zusätzliche Zusammenfassung neben Einzelzeilen.
 Nutze AKTION, wenn Alex etwas plant, sich vornimmt, notieren oder merken will. Übernimm nur, was Alex selbst gesagt hat. Die AKTION-Zeilen werden nicht vorgelesen; sag davor kurz, was du festgehalten hast.
 Schreib Titel, Notizen und Erinnerungen immer in korrektem Deutsch: verschluckte oder abgeschnittene Wortenden ergänzen (z. B. „Grundschul-Marklohe“ = „Grundschule Marklohe“), falsche Bindestriche und Großschreibung korrigieren, Füllwörter weglassen, kurz und klar formulieren. Erinnerungstexte ohne Vorsilbe „Erinnerung:“, dafür mit dem Anlass und ggf. Uhrzeit des Termins.
 Die Frage kommt oft aus der Spracherkennung und kann Hörfehler enthalten. Korrigiere offensichtliche Fehler anhand der Notizen und der Fachwörter, bevor du antwortest oder etwas notierst (z. B. „Cloud Quote ABI“ = „Claude Code API“, „Bio Office“ = „BioOffice“). Speichere Notizen immer in der korrigierten Schreibweise. Ist etwas wirklich unklar, frag kurz nach.
@@ -189,6 +190,7 @@ module.exports = class JarvisVoice extends Plugin {
     }
     const path = w === "idee" ? "60-Ideen/Übersicht.md" : "00-Eingang/Eingang.md", f = v.getAbstractFileByPath(path);
     if (!f) return v.create(path, z + "\n");
+    if (dpDoppelt(t, await v.read(f))) throw new Error("♻️ Steht schon drin – nicht doppelt gespeichert");
     return v.process(f, s => s.replace(/\n*(- \s*)?$/, "\n") + z + "\n");
   }
 
@@ -213,6 +215,10 @@ module.exports = class JarvisVoice extends Plugin {
   }
 };
 
+
+/* Dopplungs-Schutz: ≥60 % und mind. 3 gleiche Wortstämme mit einer vorhandenen Zeile → nicht speichern */
+const dpWorte = s => new Set(String(s).toLowerCase().replace(/_\(.*?\)_/g, "").replace(/ß/g, "ss").normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/[^a-z0-9]+/).filter(w => w.length >= 4).map(w => w.slice(0, 5)));
+const dpDoppelt = (neu, text) => { const a = dpWorte(neu); if (a.size < 2) return false; return String(text || "").split("\n").filter(l => /^\s*- /.test(l)).some(l => { const b = dpWorte(l); if (b.size < 2) return false; let n = 0; for (const w of a) if (b.has(w)) n++; return n >= 3 && n / Math.min(a.size, b.size) >= 0.6; }); };
 
 /* ---------- Widget „Mein Tag“ ---------- */
 const FK_DATEI = "00-Cockpit/Fokus.md";
