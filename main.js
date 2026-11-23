@@ -10,7 +10,7 @@ Grundlage ist Alex' Wissensspeicher (Notizen unten). Erfinde keine Fakten, Termi
 Du kannst in den Wissensspeicher schreiben. Hänge dafür ans ENDE eine oder mehrere eigene Zeilen:
 AKTION: notiz | <Text>   (Notiz in den Eingang)
 AKTION: idee | <Text>    (Idee in den Ideen-Ordner)
-AKTION: fokus | <A>; <B>; <C>   (ersetzt „Heute im Fokus“, höchstens 3 kurze Aufgaben)
+AKTION: fokus | <heute|morgen|übermorgen> | <A>; <B>; <C>   (ersetzt den Fokus dieses Tages im Cockpit, höchstens 3 kurze Aufgaben)
 AKTION: termin | <Titel> | <Start JJJJ-MM-TTTHH:MM oder JJJJ-MM-TT für ganztägig> | <Dauer in Minuten, Standard 60>   (Google Kalender)
 AKTION: erinnerung | <JJJJ-MM-TTTHH:MM> | <Text>   (Jarvis meldet sich genau dann in Telegram – Pop-up und Vibration)
 „Erinnere mich …“, „sag mir Bescheid …“ mit Zeitpunkt ist IMMER AKTION erinnerung (nicht notiz), eine Zeile pro Zeitpunkt. Ist die Uhrzeit unklar (z. B. 4:15 nachts statt 14:15), frag nach. Will Alex an einen Termin erinnert werden: Termin eintragen UND Erinnerung setzen.
@@ -158,8 +158,14 @@ module.exports = class JarvisVoice extends Plugin {
     const v = this.app.vault, z = `- ${t.replace(/\n+/g, " ")} _(${stamp()})_`;
     if (w === "fokus") {
       const f = v.getAbstractFileByPath("Start.md"); if (!f) throw new Error("Start.md fehlt");
-      return v.process(f, s => { const L = s.split("\n"), h = L.findIndex(l => /^##\s.*Fokus/i.test(l)); if (h < 0) return s; let a = h + 1; while (a < L.length && !L[a].trim()) a++; let b = a; while (b < L.length && /^\s*- \[[ xX]\]/.test(L[b])) b++;
-        const neu = t.split(/\s*;\s*/).filter(Boolean).slice(0, 5).map(x => `- [ ] ${x}`); while (neu.length < 3) neu.push("- [ ] "); L.splice(a, b - a, ...neu); return L.join("\n"); });
+      const m = /^\s*(heute|morgen|übermorgen|uebermorgen)\s*[|:]\s*/i.exec(t), off = !m || /^heute$/i.test(m[1]) ? 0 : /^morgen$/i.test(m[1]) ? 1 : 2;
+      const items = (m ? t.slice(m[0].length) : t).split(/\s*;\s*/).map(x => x.trim()).filter(Boolean).slice(0, 5); if (!items.length) throw new Error("Fokus ohne Aufgaben");
+      const d = new Date(); d.setDate(d.getDate() + off); const p2 = n => String(n).padStart(2, "0"), k = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
+      // Block mit diesem Datum ersetzen; gibt es ihn (noch) nicht, legt das Plugin einen [!fokus|neu …]-Block an – der Telegram-Jarvis sortiert ihn in ~2 Min. ein.
+      return v.process(f, s => { const L = s.split("\n"), i = L.findIndex(l => new RegExp("^>\\s*\\[!fokus\\|\\w+\\s+" + k + "\\]").test(l));
+        if (i >= 0) { let b = i + 1; while (b < L.length && /^>/.test(L[b])) b++; const z = items.map(x => "> - [ ] " + x); while (z.length < 2) z.push("> - [ ] "); L.splice(i + 1, b - i - 1, ...z); return L.join("\n"); }
+        const h = L.findIndex(l => /^##\s.*Fokus/i.test(l)); if (h < 0) throw new Error("Fokus-Abschnitt fehlt in Start.md");
+        L.splice(h + 1, 0, `> [!fokus|neu ${k}] Neu · ${d.getDate()}.${d.getMonth() + 1}.`, ...items.map(x => "> - [ ] " + x), ""); return L.join("\n"); });
     }
     if (w === "erinnerung") {
       if (!/^\s*\d{4}-\d{2}-\d{2}T\d{2}:\d{2}\s*\|\s*\S/.test(t)) throw new Error("Erinnerung ohne Zeitpunkt");
