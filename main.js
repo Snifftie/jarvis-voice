@@ -44,6 +44,10 @@ module.exports = class JarvisVoice extends Plugin {
     this.hist = []; this.rec = null; this.audio = null; this.views = new Set();
     this.addSettingTab(new JVSettings(this.app, this));
     this.registerMarkdownCodeBlockProcessor("jarvis", (src, el) => this.render(el));
+    // „Mein Tag“: Widget über 00-Cockpit/Fokus.md (pflegt der Telegram-Jarvis), zeichnet sich bei jeder Änderung neu
+    this.tagViews = new Set(); this.tagSel = null;
+    this.registerMarkdownCodeBlockProcessor("jarvis-tag", (src, el) => { const v = new MeinTag(this, el); this.tagViews.add(v); v.draw(); });
+    this.registerEvent(this.app.vault.on("modify", f => { if (f.path === FK_DATEI) for (const v of [...this.tagViews]) { if (!v.el.isConnected) this.tagViews.delete(v); else v.draw(); } }));
     this.addRibbonIcon("mic", "Jarvis fragen", () => this.toggle());
     this.addCommand({ id: "jarvis-aufnahme", name: "Sprechen (Start/Stopp)", callback: () => this.toggle() });
   }
@@ -157,15 +161,13 @@ module.exports = class JarvisVoice extends Plugin {
   async aktion(w, t) {
     const v = this.app.vault, z = `- ${t.replace(/\n+/g, " ")} _(${stamp()})_`;
     if (w === "fokus") {
-      const f = v.getAbstractFileByPath("Start.md"); if (!f) throw new Error("Start.md fehlt");
       const m = /^\s*(heute|morgen|übermorgen|uebermorgen)\s*[|:]\s*/i.exec(t), off = !m || /^heute$/i.test(m[1]) ? 0 : /^morgen$/i.test(m[1]) ? 1 : 2;
       const items = (m ? t.slice(m[0].length) : t).split(/\s*;\s*/).map(x => x.trim()).filter(Boolean).slice(0, 5); if (!items.length) throw new Error("Fokus ohne Aufgaben");
-      const d = new Date(); d.setDate(d.getDate() + off); const p2 = n => String(n).padStart(2, "0"), k = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
-      // Block mit diesem Datum ersetzen; gibt es ihn (noch) nicht, legt das Plugin einen [!fokus|neu …]-Block an – der Telegram-Jarvis sortiert ihn in ~2 Min. ein.
-      return v.process(f, s => { const L = s.split("\n"), i = L.findIndex(l => new RegExp("^>\\s*\\[!fokus\\|\\w+\\s+" + k + "\\]").test(l) || l.startsWith(">") && l.includes("%%fokus " + k + "%%"));
-        if (i >= 0) { let b = i + 1; while (b < L.length && /^>\s*- \[[ xX]\]/.test(L[b])) b++; const termine = L.slice(i + 1, b).filter(l => l.includes("📅")), z = items.map(x => "> - [ ] " + x); while (z.length < 2) z.push("> - [ ] "); L.splice(i + 1, b - i - 1, ...termine, ...z); return L.join("\n"); }
-        const h = L.findIndex(l => /^##\s.*Fokus/i.test(l)); if (h < 0) throw new Error("Fokus-Abschnitt fehlt in Start.md");
-        L.splice(h + 1, 0, `> [!fokus|neu ${k}] Neu · ${d.getDate()}.${d.getMonth() + 1}.`, ...items.map(x => "> - [ ] " + x), ""); return L.join("\n"); });
+      const d = new Date(); d.setDate(d.getDate() + off); const k = tagK(d);
+      // Aufgaben dieses Tages in Fokus.md ersetzen, Termine (📅) bleiben; fehlt der Tag, wird er angehängt (der Bot sortiert ein)
+      return fkAendern(this.app, L => { const h = L.findIndex(l => l.startsWith("## " + k)); const neu = items.map(x => "- [ ] " + x);
+        if (h < 0) { L.push("", "## " + k, ...neu); return L; } let b = h + 1; while (b < L.length && !/^#/.test(L[b]) && L[b].trim()) b++;
+        const termine = L.slice(h + 1, b).filter(l => l.includes("📅")); L.splice(h + 1, b - h - 1, ...termine, ...neu); return L; });
     }
     if (w === "erinnerung") {
       if (!/^\s*\d{4}-\d{2}-\d{2}T\d{2}:\d{2}\s*\|\s*\S/.test(t)) throw new Error("Erinnerung ohne Zeitpunkt");
@@ -202,6 +204,89 @@ module.exports = class JarvisVoice extends Plugin {
     if (window.speechSynthesis) { const u = new SpeechSynthesisUtterance(clean); u.lang = "de-DE"; speechSynthesis.cancel(); speechSynthesis.speak(u); }
   }
 };
+
+
+/* ---------- Widget „Mein Tag“ ---------- */
+const FK_DATEI = "00-Cockpit/Fokus.md";
+const tagK = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+async function fkAendern(app, fn) {
+  let f = app.vault.getAbstractFileByPath(FK_DATEI);
+  if (!f) f = await app.vault.create(FK_DATEI, "# 🎯 Fokus-Daten\n");
+  return app.vault.process(f, s => fn(s.split("\n")).join("\n"));
+}
+function fkParse(text) {
+  const tage = []; let cur = null;
+  text.split("\n").forEach((l, i) => {
+    const m = /^##\s+(\d{4}-\d{2}-\d{2})\s*(.*)$/.exec(l);
+    if (m) { const p = m[2].split("·").map(x => x.trim()).filter(Boolean); cur = { k: m[1], schicht: p[1] || "", dani: p[2] || "", items: [] }; tage.push(cur); return; }
+    if (/^#/.test(l)) { cur = null; return; }
+    const t = /^\s*- \[([ xX])\]\s*(.*)$/.exec(l);
+    if (cur && t && t[2].trim()) cur.items.push({ line: i, done: t[1] !== " ", txt: t[2].trim() });
+  });
+  return tage;
+}
+class MeinTag {
+  constructor(plugin, el) { this.p = plugin; this.app = plugin.app; this.el = el; }
+  async draw() {
+    const f = this.app.vault.getAbstractFileByPath(FK_DATEI), el = this.el; el.empty();
+    const card = el.createDiv({ cls: "jt-card" }), head = card.createDiv({ cls: "jt-head" });
+    head.createEl("b", { text: "🎯 Mein Tag" }); head.createSpan({ text: "wischen ← →" });
+    if (!f) { card.createDiv({ cls: "jt-leer", text: "Noch keine Daten – der Telegram-Jarvis legt sie gleich an." }); return; }
+    const heute = tagK(new Date()), tage = fkParse(await this.app.vault.read(f)).filter(t => t.k >= heute).sort((a, b) => a.k.localeCompare(b.k));
+    if (!tage.length) { card.createDiv({ cls: "jt-leer", text: "Keine Tage gefunden." }); return; }
+    let i = Math.max(0, tage.findIndex(t => t.k === this.p.tagSel)); const tag = tage[i];
+    const wahl = n => { if (n < 0 || n >= tage.length) return; this.p.tagSel = tage[n].k; for (const v of this.p.tagViews) if (v.el.isConnected) v.draw(); };
+    // Tagesleiste
+    const leiste = card.createDiv({ cls: "jt-days" });
+    tage.slice(0, 14).forEach((t, n) => {
+      const d = new Date(t.k + "T12:00:00"), c = leiste.createDiv({ cls: "jt-d" + (n === i ? " jt-on" : "") });
+      c.createSpan({ text: t.k === heute ? "Heute" : d.toLocaleDateString("de-DE", { weekday: "short" }).replace(".", "") });
+      c.createEl("b", { text: String(d.getDate()) });
+      c.createEl("i", { text: t.schicht === "frei" || !t.schicht ? "frei" : t.schicht.split(" ")[0] });
+      if (t.items.some(x => x.txt.startsWith("📅") && !x.done)) c.createSpan({ cls: "jt-dot" });
+      c.onclick = () => wahl(n);
+    });
+    setTimeout(() => { const on = leiste.querySelector(".jt-on"); if (on) leiste.scrollLeft = Math.max(0, on.offsetLeft - leiste.offsetLeft - 8); }, 0);
+    // Tageskopf
+    const kopf = card.createDiv({ cls: "jt-dayhead" }), dd = new Date(tag.k + "T12:00:00");
+    kopf.createEl("b", { text: dd.toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long" }) });
+    if (tag.schicht) kopf.createSpan({ cls: "jt-chip " + (/Früh/.test(tag.schicht) ? "jt-f" : /Spät/.test(tag.schicht) ? "jt-s" : /Nacht/.test(tag.schicht) ? "jt-n" : "jt-grau"), text: tag.schicht });
+    if (tag.dani) kopf.createSpan({ cls: "jt-chip " + (/\?|frei/.test(tag.dani) ? "jt-grau" : "jt-g"), text: tag.dani });
+    const termine = tag.items.filter(x => x.txt.startsWith("📅")), aufg = tag.items.filter(x => !x.txt.startsWith("📅"));
+    const zeile = (box, x) => {
+      const r = box.createDiv({ cls: "jt-row" + (x.done ? " jt-done" : "") }), cb = r.createDiv({ cls: "jt-cb" + (x.done ? " jt-ok" : ""), text: x.done ? "✓" : "" });
+      let txt = x.txt.replace(/^📅\s*/, ""); const zt = /^(\d{1,2}:\d{2})\s+(.*)$/.exec(txt);
+      if (x.txt.startsWith("📅") && zt) { r.createSpan({ cls: "jt-t", text: zt[1] }); txt = zt[2]; }
+      const carry = txt.startsWith("↻ "), sp = r.createSpan({ cls: "jt-x", text: carry ? txt.slice(2) : txt });
+      if (carry) sp.createSpan({ cls: "jt-carry", text: " ↻ von gestern" });
+      r.onclick = () => this.toggle(x);
+    };
+    if (termine.length) { card.createDiv({ cls: "jt-sec", text: "Termine" }); termine.forEach(x => zeile(card, x)); }
+    card.createDiv({ cls: "jt-sec", text: "Aufgaben" });
+    if (aufg.length) aufg.forEach(x => zeile(card, x)); else card.createDiv({ cls: "jt-leer", text: "Noch nichts geplant." });
+    // Eingabe
+    const add = card.createDiv({ cls: "jt-add" }), inp = add.createEl("input", { type: "text", placeholder: "+ Aufgabe für " + (tag.k === heute ? "heute" : dd.toLocaleDateString("de-DE", { weekday: "long" })) + " …" });
+    const btn = add.createEl("button", { text: "＋" }), neu = async () => { const v = inp.value.trim(); if (!v) return; inp.value = ""; await this.add(tag.k, v); };
+    btn.onclick = neu; inp.addEventListener("keydown", e => { if (e.key === "Enter") neu(); });
+    // Punkte + Vorschau
+    const dots = card.createDiv({ cls: "jt-dots" }); tage.slice(0, 7).forEach((t, n) => dots.createEl("i", { cls: n === i ? "jt-on" : "" }));
+    const nx = tage[i + 1];
+    if (nx) { const t1 = nx.items.find(x => x.txt.startsWith("📅")); card.createDiv({ cls: "jt-next", text: `${i === 0 && tag.k === heute ? "Morgen" : new Date(nx.k + "T12:00:00").toLocaleDateString("de-DE", { weekday: "long" })}: ${nx.schicht || "frei"}${t1 ? " · " + t1.txt.replace(/^📅\s*/, "") : ""}` }); }
+    // Wischen
+    let x0 = null, y0 = null;
+    card.addEventListener("touchstart", e => { x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; }, { passive: true });
+    card.addEventListener("touchend", e => { if (x0 === null) return; const dx = e.changedTouches[0].clientX - x0, dy = e.changedTouches[0].clientY - y0; x0 = null;
+      if (Math.abs(dx) > 60 && Math.abs(dx) > 2 * Math.abs(dy) && !e.target.closest(".jt-days")) wahl(dx < 0 ? i + 1 : i - 1); }, { passive: true });
+  }
+  async toggle(x) {
+    await fkAendern(this.app, L => { let n = x.line; const passt = l => l && l.replace(/^\s*- \[[ xX]\]\s*/, "").trim() === x.txt;
+      if (!passt(L[n])) n = L.findIndex(passt); if (n >= 0) L[n] = L[n].replace(/- \[[ xX]\]/, x.done ? "- [ ]" : "- [x]"); return L; });
+  }
+  async add(k, txt) {
+    await fkAendern(this.app, L => { const h = L.findIndex(l => l.startsWith("## " + k)); if (h < 0) { L.push("", "## " + k, "- [ ] " + txt); return L; }
+      let b = h + 1; while (b < L.length && /^\s*- \[[ xX]\]/.test(L[b])) b++; L.splice(b, 0, "- [ ] " + txt); return L; });
+  }
+}
 
 class JVSettings extends PluginSettingTab {
   constructor(app, plugin) { super(app, plugin); this.plugin = plugin; }

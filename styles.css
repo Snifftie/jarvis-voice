@@ -10,3 +10,38 @@
 .jv-row { display: flex; gap: 8px; margin-top: 12px; }
 .jv-input { flex: 1; border-radius: 12px !important; background: #0b1730 !important; border: 1px solid #23395f !important; color: #e8eefc !important; padding: 8px 12px !important; }
 .jv-send { border-radius: 12px !important; background: #1c3a6b !important; color: #fff !important; border: none !important; }
+
+/* „Mein Tag“ (```jarvis-tag```) */
+.jt-card { margin: 10px 0; padding: 14px; border-radius: 24px; background: linear-gradient(160deg, rgba(255,255,255,.07), rgba(255,255,255,.03)); border: 1px solid rgba(255,255,255,.12); box-shadow: 0 10px 34px rgba(0,0,0,.35); color: #e8eefc; user-select: none; }
+.jt-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.jt-head b { font-size: 1.15em; }
+.jt-head span { font-size: .72em; color: #9aa6c8; }
+.jt-days { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; margin-bottom: 12px; padding-bottom: 2px; }
+.jt-days::-webkit-scrollbar { display: none; }
+.jt-d { flex: 0 0 auto; min-width: 52px; text-align: center; padding: 7px 4px; border-radius: 14px; background: rgba(255,255,255,.05); font-size: .7em; color: #9aa6c8; line-height: 1.2; position: relative; cursor: pointer; }
+.jt-d b { display: block; font-size: 1.45em; color: #e8eefc; }
+.jt-d i { display: block; font-style: normal; font-size: 1.05em; margin-top: 2px; }
+.jt-d.jt-on { background: linear-gradient(135deg, #4f6bff, #8a4fff); color: #e5e8ff; }
+.jt-d.jt-on b { color: #fff; }
+.jt-dot { position: absolute; top: 4px; right: 6px; width: 6px; height: 6px; border-radius: 50%; background: #4fbf6a; }
+.jt-dayhead { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 2px 2px 8px; }
+.jt-dayhead b { font-size: 1.05em; margin-right: 2px; }
+.jt-chip { font-size: .72em; font-weight: 600; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+.jt-f { background: #f2b33d; color: #3b2600; } .jt-s { background: #7a55e0; color: #fff; } .jt-n { background: #22367a; color: #fff; }
+.jt-g { background: #2e8c47; color: #fff; } .jt-grau { background: rgba(255,255,255,.1); color: #c9d2ee; }
+.jt-sec { font-size: .66em; letter-spacing: .07em; text-transform: uppercase; color: #7f8ab0; margin: 10px 2px 6px; }
+.jt-row { display: flex; align-items: center; gap: 10px; background: rgba(255,255,255,.04); border-radius: 14px; padding: 10px 12px; margin-bottom: 6px; cursor: pointer; }
+.jt-cb { width: 20px; height: 20px; border-radius: 7px; border: 2px solid #6c78a8; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; }
+.jt-cb.jt-ok { background: #7c5cff; border-color: #7c5cff; color: #fff; }
+.jt-t { font-size: .78em; font-weight: 700; color: #b9c4ff; background: rgba(124,92,255,.18); border-radius: 8px; padding: 3px 6px; flex: 0 0 auto; }
+.jt-x { font-size: .92em; line-height: 1.3; flex: 1; min-width: 0; }
+.jt-done .jt-x { color: #7f8ab0; text-decoration: line-through; }
+.jt-carry { font-size: .8em; color: #f2b33d; text-decoration: none; }
+.jt-leer { font-size: .85em; color: #7f8ab0; padding: 6px 4px; }
+.jt-add { display: flex; gap: 8px; margin-top: 10px; }
+.jt-add input { flex: 1; border-radius: 14px !important; border: 1px dashed rgba(255,255,255,.2) !important; background: transparent !important; color: #e8eefc !important; padding: 10px 12px !important; font-size: .9em; }
+.jt-add button { width: 44px; border-radius: 14px !important; background: #24366e !important; color: #fff !important; border: none !important; font-size: 1.1em; }
+.jt-dots { display: flex; justify-content: center; gap: 6px; margin-top: 12px; }
+.jt-dots i { width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,.2); }
+.jt-dots i.jt-on { width: 18px; border-radius: 4px; background: #8a4fff; }
+.jt-next { text-align: center; font-size: .75em; color: #7f8ab0; margin-top: 6px; }
