@@ -43,6 +43,15 @@ function erLesen(txt, jetzt) {
   }
   return null;
 }
+// Lernkreislauf (0.2.5): passende Lektionen aus 90-Claude/Lektionen.md (pflegt der Telegram-Jarvis) + Lernfälle an ihn melden
+const LF_KORR = /^\s*(nein|ne|nö|falsch|stimmt nicht|nicht richtig|quatsch|so nicht)\b|\b(ich (hab|habe)\b.{0,40}\bgesagt|ich meinte|meinte ich|du hast\b.{0,25}\b(falsch|vergessen|nicht)|warum (hast|machst|verbessert|kommt|ist)|funktioniert nicht|geht nicht|klappt nicht|kacke|immer noch (nicht|falsch|kacke)|nicht gespeichert|nicht eingetragen|hat nicht geklappt)\b/i;
+const lfStamm = s => [...new Set(String(s).toLowerCase().replace(/ß/g, "ss").normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/[^a-z0-9]+/).filter(w => w.length >= 4).map(w => w.slice(0, 5)))];
+function lkAusText(t, q, max = 5) {
+  const teil = String(t || "").split(/^## /m).find(x => x.startsWith("Aktiv")) || "", a = lfStamm(q), L = [];
+  const re = /^- \*\*(L\d+)\*\* · (.+)\n\s+- `([^`]*)` · für (\w+)/gm; let m;
+  while ((m = re.exec(teil))) { if (m[4] === "claude") continue; const s = m[3].split(/\s+/).map(x => lfStamm(x)[0] || x.slice(0, 5)).filter(x => a.includes(x)).length; if (s) L.push({ id: m[1], wd: m[2], s }); }
+  return L.sort((x, y) => y.s - x.s).slice(0, max);
+}
 function heute() { const d = new Date(), p = n => String(n).padStart(2, "0"); return d.toLocaleString("de-DE", { weekday: "long" }) + ` ${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}, ${p(d.getHours())}:${p(d.getMinutes())} Uhr`; }
 
 function multipart(fields, file) {
@@ -138,7 +147,8 @@ module.exports = class JarvisVoice extends Plugin {
 
   async ki(q) {
     let wx = ""; if (/wetter|regen|schnee|sonne|temperatur|grad|warm|kalt|frost|glatt|wind|jacke|schirm|draußen/i.test(q)) { try { wx = "\n\n" + await this.wetter(); } catch (e) { wx = "\n\nWetterdienst gerade nicht erreichbar."; } }
-    const baue = async max => SYS + `\n\nHeute: ${heute()}.${wx}\nWissensspeicher:${await this.kontext(max)}`;
+    let lk = ""; try { const f = this.app.vault.getAbstractFileByPath("90-Claude/Lektionen.md"); const L = f ? lkAusText(await this.app.vault.cachedRead(f), q) : []; if (L.length) lk = "\n\nGelernte Lektionen aus früheren Fehlern (Hinweise – die Regeln oben gehen vor):\n" + L.map(l => `- ${l.id}: ${l.wd}`).join("\n"); } catch (e) { }
+    const baue = async max => SYS + lk + `\n\nHeute: ${heute()}.${wx}\nWissensspeicher:${await this.kontext(max)}`;
     const verlauf = this.hist.filter(h => Date.now() - h.t < 30 * 60e3).slice(-4).flatMap(h => [{ role: "user", content: h.q }, { role: "assistant", content: h.a }]);
     const msgs = [...verlauf, { role: "user", content: q }], fehler = [];
     if (this.cfg.claude) {
@@ -167,14 +177,20 @@ module.exports = class JarvisVoice extends Plugin {
     throw new Error("Keine KI erreichbar (" + fehler.slice(-4).join(", ") + ").");
   }
 
+  async lernfall(frage, signal) {
+    try { const v = this.app.vault, P = "00-Cockpit/Lernfaelle-neu.md", z = "- " + stamp() + " | " + String(frage).replace(/[|\n]+/g, " ").slice(0, 300) + " | " + String(signal).replace(/\n+/g, " ").slice(0, 300), f = v.getAbstractFileByPath(P);
+      if (f) await v.process(f, s => s.replace(/\n*$/, "\n") + z + "\n"); else await v.create(P, "# Lernfälle aus Obsidian\n\nDer Telegram-Jarvis holt diese Zeilen ab und denkt nachts darüber nach.\n\n" + z + "\n"); } catch (e) { console.log("Jarvis Lernfall:", e); }
+  }
+
   async ask(q, ton) {
+    { const last = this.hist.filter(h => Date.now() - h.t < 30 * 60e3).slice(-1)[0]; if (last && LF_KORR.test(q)) this.lernfall(last.q + " → " + last.a, "Korrektur: " + q); }
     this.ui("Denke nach …", "„" + q + "“", true);
     try {
       const r = await this.ki(q);
       const akts = [...r.text.matchAll(/^\s*AKTION:\s*(notiz|idee|fokus|termin|erinnerung|buch)\s*\|\s*(.+)$/gim)].map(m => [m[1].toLowerCase(), m[2].trim()]);
       let text = r.text.replace(/^\s*AKTION:.*$/gim, "").trim(); const done = [];
       for (const [w, t] of akts) { try { await this.aktion(w, t); done.push(w === "buch" ? "📚 Buch wird geprüft – Antwort kommt in Telegram" : w === "erinnerung" ? "⏰ Erinnerung kommt per Telegram" : w === "termin" ? "📅 Termin geht in ~2 Min. in deinen Kalender" : w === "fokus" ? "🎯 Fokus gesetzt" : w === "idee" ? "💡 Idee gespeichert" : "📥 Notiz im Eingang"); } catch (e) { done.push("⚠️ " + e.message); } }
-      const fehl = done.filter(x => x.startsWith("⚠️")); if (fehl.length) text = (text ? text + "\n\n" : "") + fehl.join("\n");
+      const fehl = done.filter(x => x.startsWith("⚠️")); if (fehl.length) { text = (text ? text + "\n\n" : "") + fehl.join("\n"); this.lernfall(q, fehl.join(" ")); }
       this.hist.push({ q, a: text || "(festgehalten)", t: Date.now() }); if (this.hist.length > 8) this.hist.shift();
       this.ui("v" + this.manifest.version + " · " + r.via + (done.length ? " · " + done.join(" · ") : ""), "„" + q + "“\n\n" + (text || done.join("\n")), false);
       if (ton && this.cfg.ton && text) await this.sprich(text);
