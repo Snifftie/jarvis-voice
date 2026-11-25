@@ -11,8 +11,8 @@ Du kannst in den Wissensspeicher schreiben. Hänge dafür ans ENDE eine oder meh
 AKTION: notiz | <Text>   (Notiz in den Eingang)
 AKTION: idee | <Text>    (Idee in den Ideen-Ordner)
 AKTION: fokus | <heute|morgen|übermorgen> | <A>; <B>; <C>   (ersetzt den Fokus dieses Tages im Cockpit, höchstens 3 kurze Aufgaben)
-AKTION: termin | <Titel> | <Start JJJJ-MM-TTTHH:MM oder JJJJ-MM-TT für ganztägig> | <Dauer in Minuten, Standard 60>   (Google Kalender)
-AKTION: erinnerung | <JJJJ-MM-TTTHH:MM> | <Text>   (Jarvis meldet sich genau dann in Telegram – Pop-up und Vibration)
+AKTION: termin | <Titel> | <Start JJJJ-MM-TT>T<HH:MM> oder <JJJJ-MM-TT> für ganztägig> | <Dauer in Minuten, Standard 60>   (Google Kalender)
+AKTION: erinnerung | <JJJJ-MM-TT>T<HH:MM> | <Text>   z. B. AKTION: erinnerung | 2026-11-25T17:30 | Elisa bei Sophia abholen   (Jarvis meldet sich genau dann in Telegram – Pop-up und Vibration)
 AKTION: buch | <Titel – Autor (falls genannt)>   (Buchwunsch auf die Liste Buchwünsche)
 „Buchwunsch …“, „das Buch will ich lesen …“ ist IMMER AKTION buch (nicht notiz), ein Buch pro Zeile. Das Buch wird danach in einer Bücher-Datenbank geprüft – sag NICHT, dass es eingetragen ist, sondern dass du es prüfst und die Antwort in Telegram kommt.
 „Erinnere mich …“, „sag mir Bescheid …“ mit Zeitpunkt ist IMMER AKTION erinnerung (nicht notiz), eine Zeile pro Zeitpunkt. Ist die Uhrzeit unklar (z. B. 4:15 nachts statt 14:15), frag nach. Will Alex an einen Termin erinnert werden: Termin eintragen UND Erinnerung setzen.
@@ -24,6 +24,25 @@ Die Frage kommt oft aus der Spracherkennung und kann Hörfehler enthalten. Korri
 Keine Kauf-/Verkaufsempfehlungen beim Trading.`;
 
 function stamp() { const d = new Date(); const p = n => String(n).padStart(2, "0"); return `${p(d.getDate())}.${p(d.getMonth() + 1)}. ${p(d.getHours())}:${p(d.getMinutes())}`; }
+// Zeitpunkt einer Erinnerung tolerant lesen → "JJJJ-MM-TTTHH:MM" (Berliner Zeit). Akzeptiert ISO (mit Leerzeichen/Sekunden), 25.11.(2026) 17:30, heute/morgen/übermorgen 17:30, nur 17:30 / 17.30 / 17 Uhr.
+// Auch vertauschte Felder (Text | Zeit). Liefert {at, text, morgen:true wenn die Uhrzeit heute schon vorbei war} oder null.
+function erLesen(txt, jetzt) {
+  const p2 = n => String(n).padStart(2, "0"), teile = String(txt).split("|").map(x => x.trim()).filter(Boolean);
+  const berl = new Date((jetzt || new Date()).toLocaleString("en-US", { timeZone: "Europe/Berlin" })), d0 = new Date(berl.getFullYear(), berl.getMonth(), berl.getDate());
+  const iso = (d, h, m) => `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}T${p2(h)}:${p2(m)}`;
+  for (let i = 0; i < teile.length; i++) {
+    const s = teile[i].toLowerCase().replace(/\s*uhr\b/g, "").trim(); let m, d = null, h, mi, nurZeit = false;
+    if ((m = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[t\s]+(\d{1,2})[:.](\d{2})(?::\d{2})?)?$/.exec(s)) && m[4] != null) { d = new Date(+m[1], m[2] - 1, +m[3]); h = +m[4]; mi = +m[5]; }
+    else if ((m = /^(\d{1,2})\.(\d{1,2})\.(\d{2,4})?\s*,?\s*(\d{1,2})[:.](\d{2})$/.exec(s))) { const y = m[3] ? (m[3].length === 2 ? 2000 + +m[3] : +m[3]) : d0.getFullYear(); d = new Date(y, m[2] - 1, +m[1]); h = +m[4]; mi = +m[5]; if (!m[3] && d < d0) d.setFullYear(y + 1); }
+    else if ((m = /^(heute|morgen|übermorgen|uebermorgen)\s*,?\s*(?:um\s*)?(\d{1,2})(?:[:.](\d{2}))?$/.exec(s))) { d = new Date(d0); d.setDate(d.getDate() + (m[1] === "heute" ? 0 : m[1] === "morgen" ? 1 : 2)); h = +m[2]; mi = +(m[3] || 0); }
+    else if ((m = /^(?:um\s*)?(\d{1,2})(?:[:.](\d{2}))?$/.exec(s)) && (m[2] != null || /uhr/i.test(teile[i]))) { d = new Date(d0); h = +m[1]; mi = +(m[2] || 0); nurZeit = true; }
+    if (!d || h > 23 || mi > 59 || isNaN(d)) continue;
+    let morgen = false; if (nurZeit && d.getTime() + (h * 60 + mi) * 60e3 <= berl.getTime()) { d.setDate(d.getDate() + 1); morgen = true; }
+    const text = teile.filter((_, j) => j !== i).join(" | ").trim(); if (!text) return null;
+    return { at: iso(d, h, mi), text, morgen };
+  }
+  return null;
+}
 function heute() { const d = new Date(), p = n => String(n).padStart(2, "0"); return d.toLocaleString("de-DE", { weekday: "long" }) + ` ${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}, ${p(d.getHours())}:${p(d.getMinutes())} Uhr`; }
 
 function multipart(fields, file) {
@@ -155,6 +174,7 @@ module.exports = class JarvisVoice extends Plugin {
       const akts = [...r.text.matchAll(/^\s*AKTION:\s*(notiz|idee|fokus|termin|erinnerung|buch)\s*\|\s*(.+)$/gim)].map(m => [m[1].toLowerCase(), m[2].trim()]);
       let text = r.text.replace(/^\s*AKTION:.*$/gim, "").trim(); const done = [];
       for (const [w, t] of akts) { try { await this.aktion(w, t); done.push(w === "buch" ? "📚 Buch wird geprüft – Antwort kommt in Telegram" : w === "erinnerung" ? "⏰ Erinnerung kommt per Telegram" : w === "termin" ? "📅 Termin geht in ~2 Min. in deinen Kalender" : w === "fokus" ? "🎯 Fokus gesetzt" : w === "idee" ? "💡 Idee gespeichert" : "📥 Notiz im Eingang"); } catch (e) { done.push("⚠️ " + e.message); } }
+      const fehl = done.filter(x => x.startsWith("⚠️")); if (fehl.length) text = (text ? text + "\n\n" : "") + fehl.join("\n");
       this.hist.push({ q, a: text || "(festgehalten)", t: Date.now() }); if (this.hist.length > 8) this.hist.shift();
       this.ui("v" + this.manifest.version + " · " + r.via + (done.length ? " · " + done.join(" · ") : ""), "„" + q + "“\n\n" + (text || done.join("\n")), false);
       if (ton && this.cfg.ton && text) await this.sprich(text);
@@ -179,8 +199,8 @@ module.exports = class JarvisVoice extends Plugin {
       return bf ? v.process(bf, s => s.replace(/\n*$/, "\n") + "- " + txt + "\n") : v.create(p, "# Buchwunsch-Warteschlange\n\nDer Telegram-Jarvis prüft diese Titel und trägt sie in die Buchwünsche ein.\n\n- " + txt + "\n");
     }
     if (w === "erinnerung") {
-      if (!/^\s*\d{4}-\d{2}-\d{2}T\d{2}:\d{2}\s*\|\s*\S/.test(t)) throw new Error("Erinnerung ohne Zeitpunkt");
-      const ef = v.getAbstractFileByPath("00-Cockpit/Erinnerungen-neu.md"), el = "- " + t.replace(/\n+/g, " ");
+      const z = erLesen(t); if (!z) throw new Error("Erinnerung NICHT gespeichert – keine Uhrzeit erkannt. Sag sie bitte noch mal mit Uhrzeit.");
+      const ef = v.getAbstractFileByPath("00-Cockpit/Erinnerungen-neu.md"), el = "- " + z.at + " | " + z.text.replace(/\n+/g, " ");
       return ef ? v.process(ef, s => s.replace(/\n*$/, "\n") + el + "\n") : v.create("00-Cockpit/Erinnerungen-neu.md", "# Erinnerungs-Warteschlange\n\nDer Telegram-Jarvis holt diese Zeilen ab und meldet sich zur Zeit.\n\n" + el + "\n");
     }
     if (w === "termin") {
