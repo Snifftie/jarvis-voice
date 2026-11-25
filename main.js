@@ -11,6 +11,8 @@ Grundlage ist Alex' Wissensspeicher (Notizen unten). Erfinde keine Fakten, Termi
 Du kannst in den Wissensspeicher schreiben. Hänge dafür ans ENDE eine oder mehrere eigene Zeilen:
 AKTION: notiz | <Text>   (Notiz in den Eingang)
 AKTION: idee | <Text>    (Idee in den Ideen-Ordner)
+AKTION: notizseite | <Thema> | <Text>   (persönliche Sammlung im Ordner Notizen, eine Seite pro Thema, z. B. AKTION: notizseite | Elisa Weihnachtsgeschenke | Schachbrett)
+Der Ideen-Ordner ist NUR für Ideen zu Projekten, Geschäft, Websites, Jarvis und Produkten. Persönliches – Geschenkideen, Listen, Wünsche, Dinge zu einer Person, Merkzettel zu einem Thema – ist IMMER AKTION notizseite mit kurzem Thema; führe eine bestehende Seite weiter, statt eine neue mit ähnlichem Namen anzulegen. Einzelnes ohne Thema → notiz (Eingang).
 AKTION: fokus | <heute|morgen|übermorgen> | <A>; <B>; <C>   (ersetzt den Fokus dieses Tages im Cockpit, höchstens 3 kurze Aufgaben)
 AKTION: termin | <Titel> | <Start JJJJ-MM-TT>T<HH:MM> oder <JJJJ-MM-TT> für ganztägig> | <Dauer in Minuten, Standard 60>   (Google Kalender)
 AKTION: erinnerung | <JJJJ-MM-TT>T<HH:MM> | <Text>   z. B. AKTION: erinnerung | 2026-11-25T17:30 | Elisa bei Sophia abholen   (Jarvis meldet sich genau dann in Telegram – Pop-up und Vibration)
@@ -251,9 +253,9 @@ module.exports = class JarvisVoice extends Plugin {
     this.ui("Denke nach …", "„" + q + "“", true);
     try {
       const r = await this.ki(q);
-      const akts = [...r.text.matchAll(/^\s*AKTION:\s*(notiz|idee|fokus|termin|erinnerung|buch)\s*\|\s*(.+)$/gim)].map(m => [m[1].toLowerCase(), m[2].trim()]);
+      const akts = [...r.text.matchAll(/^\s*AKTION:\s*(notizseite|notiz|idee|fokus|termin|erinnerung|buch)\s*\|\s*(.+)$/gim)].map(m => [m[1].toLowerCase(), m[2].trim()]);
       let text = r.text.replace(/^\s*AKTION:.*$/gim, "").trim(); const done = [];
-      for (const [w, t] of akts) { try { await this.aktion(w, t); done.push(w === "buch" ? "📚 Buch wird geprüft – Antwort kommt in Telegram" : w === "erinnerung" ? "⏰ Erinnerung kommt per Telegram" : w === "termin" ? "📅 Termin geht in ~2 Min. in deinen Kalender" : w === "fokus" ? "🎯 Fokus gesetzt" : w === "idee" ? "💡 Idee gespeichert" : "📥 Notiz im Eingang"); } catch (e) { done.push("⚠️ " + e.message); } }
+      for (const [w, t] of akts) { try { await this.aktion(w, t); done.push(w === "buch" ? "📚 Buch wird geprüft – Antwort kommt in Telegram" : w === "erinnerung" ? "⏰ Erinnerung kommt per Telegram" : w === "termin" ? "📅 Termin geht in ~2 Min. in deinen Kalender" : w === "fokus" ? "🎯 Fokus gesetzt" : w === "notizseite" ? "🗒️ In Notizen: " + t.split("|")[0].trim() : w === "idee" ? "💡 Idee gespeichert" : "📥 Notiz im Eingang"); } catch (e) { done.push("⚠️ " + e.message); } }
       const fehl = done.filter(x => x.startsWith("⚠️")); if (fehl.length) { text = (text ? text + "\n\n" : "") + fehl.join("\n"); this.lernfall(q, fehl.join(" ")); }
       const sq = siQuellen(text, this.lastPfade || []); text = sq.text; this.quellen(sq.quellen);
       this.hist.push({ q, a: text || "(festgehalten)", t: Date.now() }); if (this.hist.length > 8) this.hist.shift();
@@ -288,6 +290,17 @@ module.exports = class JarvisVoice extends Plugin {
       if (!/\|\s*\d{4}-\d{2}-\d{2}/.test(t)) throw new Error("Termin ohne Datum");
       const tf = v.getAbstractFileByPath("00-Cockpit/Termine-neu.md"), zl = "- " + t.replace(/\n+/g, " ");
       return tf ? v.process(tf, s => s.replace(/\n*$/, "\n") + zl + "\n") : v.create("00-Cockpit/Termine-neu.md", "# Termine-Warteschlange\n\n" + zl + "\n");
+    }
+    if (w === "notizseite") {
+      const [th, ...r] = t.split("|").map(x => x.trim()), thema = th.replace(/[\\/:*?"<>|#^[\]]/g, " ").replace(/\s+/g, " ").trim().slice(0, 60), text = r.join(" | ").replace(/\n+/g, " ").trim();
+      if (!thema || !text) throw new Error("Notiz braucht Thema und Text");
+      if (!v.getAbstractFileByPath("80-Notizen")) await v.createFolder("80-Notizen").catch(() => { });
+      const p = `80-Notizen/${thema}.md`, zz = `- ${text} _(${stamp()})_`, nf = v.getAbstractFileByPath(p);
+      if (!nf) { await v.create(p, `# ${thema}\n\n[[Übersicht|← Notizen]]\n\n${zz}\n`); const u = v.getAbstractFileByPath("80-Notizen/Übersicht.md");
+        if (u) await v.process(u, s => s.includes(`[[${thema}]]`) ? s : s.replace(/\n*$/, "\n") + `- [[${thema}]]\n`); else await v.create("80-Notizen/Übersicht.md", `# 🗒️ Notizen\n\n[[Start|← Cockpit]]\n\nPersönliche Sammlungen – eine Seite pro Thema.\n\n- [[${thema}]]\n`); return; }
+      const alt = await v.read(nf), norm = x => String(x).toLowerCase().replace(/_\(.*?\)_/g, "").replace(/^\s*-\s*/, "").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+      if (dpDoppelt(text, alt) || alt.split("\n").some(l => /^\s*- /.test(l) && norm(l) === norm(text))) throw new Error("♻️ Steht schon drin – nicht doppelt gespeichert");
+      return v.process(nf, s => s.replace(/\n*(- \s*)?$/, "\n") + zz + "\n");
     }
     const path = w === "idee" ? "60-Ideen/Übersicht.md" : "00-Eingang/Eingang.md", f = v.getAbstractFileByPath(path);
     if (!f) return v.create(path, z + "\n");
