@@ -5,6 +5,7 @@ const { Plugin, PluginSettingTab, Setting, Notice, requestUrl } = require("obsid
 const KEYS = ["groq", "claude", "gemini"];
 const DEF = { woerter: "", groq: "", claude: "", gemini: "", stimme: "Sulafat", ton: true, ttsModel: "gemini-3.1-flash-tts-preview" };
 const STIMMEN = ["Sulafat", "Kore", "Puck", "Charon", "Fenrir", "Aoede", "Leda", "Orus", "Zephyr", "Enceladus"];
+const SI_REGEL = "Schreib ganz am Ende eine eigene Zeile „QUELLEN: <Pfad>; <Pfad>“ mit höchstens 3 Notizen aus dem Kontext, auf die sich deine Antwort wirklich stützt (genau die Pfade aus den === Zeilen). Hast du keine Notiz gebraucht, schreib „QUELLEN: –“.";
 const SYS = `Du bist JARVIS, der persönliche Assistent von Alex. Du antwortest gesprochen, also natürlich, locker und kurz (meist 1–4 Sätze, keine Listen, keine Tabellen, keine Emojis, keine Überschriften). Deutsch, Du-Form.
 Grundlage ist Alex' Wissensspeicher (Notizen unten). Erfinde keine Fakten, Termine, Zahlen oder Aufgaben. Steht etwas nicht in den Notizen, sag das kurz.
 Du kannst in den Wissensspeicher schreiben. Hänge dafür ans ENDE eine oder mehrere eigene Zeilen:
@@ -21,7 +22,8 @@ Pro Gedanke genau EINE AKTION-Zeile – nichts doppelt speichern, keine zusätzl
 Nutze AKTION, wenn Alex etwas plant, sich vornimmt, notieren oder merken will. Übernimm nur, was Alex selbst gesagt hat. Die AKTION-Zeilen werden nicht vorgelesen; sag davor kurz, was du festgehalten hast.
 Schreib Titel, Notizen und Erinnerungen immer in korrektem Deutsch: verschluckte oder abgeschnittene Wortenden ergänzen (z. B. „Grundschul-Marklohe“ = „Grundschule Marklohe“), falsche Bindestriche und Großschreibung korrigieren, Füllwörter weglassen, kurz und klar formulieren. Erinnerungstexte ohne Vorsilbe „Erinnerung:“, dafür mit dem Anlass und ggf. Uhrzeit des Termins.
 Die Frage kommt oft aus der Spracherkennung und kann Hörfehler enthalten. Korrigiere offensichtliche Fehler anhand der Notizen und der Fachwörter, bevor du antwortest oder etwas notierst (z. B. „Cloud Quote ABI“ = „Claude Code API“, „Bio Office“ = „BioOffice“). Speichere Notizen immer in der korrigierten Schreibweise. Ist etwas wirklich unklar, frag kurz nach.
-Keine Kauf-/Verkaufsempfehlungen beim Trading.`;
+Keine Kauf-/Verkaufsempfehlungen beim Trading.
+${SI_REGEL}`;
 
 function stamp() { const d = new Date(); const p = n => String(n).padStart(2, "0"); return `${p(d.getDate())}.${p(d.getMonth() + 1)}. ${p(d.getHours())}:${p(d.getMinutes())}`; }
 // Zeitpunkt einer Erinnerung tolerant lesen → "JJJJ-MM-TTTHH:MM" (Berliner Zeit). Akzeptiert ISO (mit Leerzeichen/Sekunden), 25.11.(2026) 17:30, heute/morgen/übermorgen 17:30, nur 17:30 / 17.30 / 17 Uhr.
@@ -43,6 +45,63 @@ function erLesen(txt, jetzt) {
   }
   return null;
 }
+// ---------- Suche (Jarvis 1.2 / Plugin 0.3): Stichwort + Wortstamm + Titel, BM25 über Abschnitte, ohne Zusatzpakete ----------
+// Gleicher Code im Telegram-Jarvis und im Obsidian-Plugin. docs = [{p: Pfad, t: Text}]
+const SI_STOP = new Set("der die das und oder aber den dem des ein eine einer eines einem einen ist sind war waren wird werden hat haben hatte mit von vom zum zur fur für auf aus bei nach uber über unter vor ich du er sie es wir ihr mein dein sein mir mich dir dich uns euch was wie wer wo wann warum noch schon auch nur nicht kein keine mal bitte sich als wenn dann dass weil hier dort heute morgen gestern sowie etwa".split(" ").map(w => w.normalize("NFD").replace(/[̀-ͯ]/g, "")));
+function siWorte(s) { return String(s || "").toLowerCase().replace(/ß/g, "ss").normalize("NFD").replace(/[̀-ͯ]/g, "").split(/[^a-z0-9]+/).filter(w => w.length >= 3 && !SI_STOP.has(w)); }
+const siStamm = w => w.slice(0, 6);
+function siTitel(p) { return String(p).split("/").pop().replace(/\.md$/, ""); }
+function siSaeubern(t) { return String(t || "").replace(/^---[\s\S]*?\n---\n/, "").replace(/```[\s\S]*?```/g, " ").replace(/<[^>]+>/g, " ").replace(/\n{3,}/g, "\n\n").trim(); }
+// Notizen in Abschnitte (an Überschriften, höchstens ~1200 Zeichen)
+function siAbschnitte(docs) {
+  const out = [];
+  for (const d of docs) {
+    const t = siSaeubern(d.t); if (!t) continue; let cur = "", h = "";
+    const push = () => { if (cur.trim()) out.push({ p: d.p, h, t: cur.trim() }); cur = ""; };
+    for (const l of t.split("\n")) { if (/^#{1,4}\s/.test(l) && cur.length > 200) { push(); h = l.replace(/^#+\s*/, ""); } else if (/^#{1,4}\s/.test(l) && !cur.trim()) h = l.replace(/^#+\s*/, ""); if (cur.length + l.length > 1200) push(); cur += l + "\n"; }
+    push();
+  }
+  return out;
+}
+function siIndex(docs) {
+  const ch = siAbschnitte(docs), df = new Map();
+  for (const c of ch) {
+    const tf = new Map(), add = (w, n) => { const s = siStamm(w); tf.set(s, (tf.get(s) || 0) + n); };
+    for (const w of siWorte(c.t)) add(w, 1);
+    for (const w of siWorte(siTitel(c.p) + " " + c.h)) add(w, 3); // Titel und Überschrift zählen dreifach
+    c.tf = tf; c.len = [...tf.values()].reduce((a, b) => a + b, 0) || 1;
+    for (const s of tf.keys()) df.set(s, (df.get(s) || 0) + 1);
+  }
+  const avg = ch.reduce((a, c) => a + c.len, 0) / (ch.length || 1);
+  return { ch, df, avg, n: ch.length, terms: [...df.keys()] };
+}
+// BM25; Wortanfänge zählen halb (z. B. „buch“ → „buchwu“), ab 4 Buchstaben
+function siSuche(ix, q, k = 8) {
+  const qs = [...new Set(siWorte(q).map(siStamm))]; if (!qs.length || !ix.n) return [];
+  const varianten = qs.map(s => { const v = [[s, 1]]; if (s.length >= 4) for (const t of ix.terms) if (t !== s && (t.startsWith(s) || (t.length >= 4 && s.startsWith(t)))) v.push([t, 0.5]); return v; });
+  const K1 = 1.4, B = 0.75, res = [];
+  for (const c of ix.ch) {
+    let sc = 0, treffer = 0;
+    for (const v of varianten) { let best = 0; for (const [t, w] of v) { const f = c.tf.get(t); if (!f) continue; const idf = Math.log(1 + (ix.n - ix.df.get(t) + 0.5) / (ix.df.get(t) + 0.5)); best = Math.max(best, w * idf * (f * (K1 + 1)) / (f + K1 * (1 - B + B * c.len / ix.avg))); } if (best) { sc += best; treffer++; } }
+    if (sc) res.push({ p: c.p, h: c.h, t: c.t, s: sc * (0.6 + 0.4 * treffer / qs.length) });
+  }
+  return res.sort((a, b) => b.s - a.s).slice(0, k);
+}
+// Kontext für die KI: Cockpit immer, dazu Titelliste und die passendsten Abschnitte; liefert auch die Kandidaten für Quellen
+function siKontext(docs, q, max = 20000) {
+  const kern = docs.filter(d => d.p.startsWith("00-Cockpit/")).map(d => `\n\n=== ${d.p} ===\n${siSaeubern(d.t).slice(0, 2500)}`).join("").slice(0, 6000);
+  const titel = "\n\nAlle Notizen: " + docs.map(d => siTitel(d.p)).join(" · ");
+  const hits = siSuche(siIndex(docs), q, 12); let teile = "", pfade = [];
+  for (const h of hits) { const s = `\n\n=== ${h.p}${h.h ? " › " + h.h : ""} ===\n${h.t}`; if ((kern + titel + teile + s).length > max) break; teile += s; if (!pfade.includes(h.p)) pfade.push(h.p); }
+  return { text: kern + titel + "\n\nPassende Stellen (Suche):" + (teile || " keine Treffer"), pfade, n: docs.length };
+}
+// „QUELLEN: a; b“ aus der Antwort lösen, nur Pfade erlauben, die wirklich im Kontext waren
+function siQuellen(text, erlaubt) {
+  let q = []; const t = String(text).replace(/^\s*QUELLEN:\s*(.*)$/gim, (_, l) => { q.push(...l.split(/[;,]/).map(x => x.trim().replace(/^\[\[|\]\]$/g, ""))); return ""; }).trim();
+  const ok = []; for (const x of q) { const p = erlaubt.find(e => e === x || siTitel(e) === siTitel(x) || e === x + ".md"); if (p && !ok.includes(p)) ok.push(p); }
+  return { text: t, quellen: ok.slice(0, 3) };
+}
+
 // Lernkreislauf (0.2.5): passende Lektionen aus 90-Claude/Lektionen.md (pflegt der Telegram-Jarvis) + Lernfälle an ihn melden
 const LF_KORR = /^\s*(nein|ne|nö|falsch|stimmt nicht|nicht richtig|quatsch|so nicht)\b|\b(ich (hab|habe)\b.{0,40}\bgesagt|ich meinte|meinte ich|du hast\b.{0,25}\b(falsch|vergessen|nicht)|warum (hast|machst|verbessert|kommt|ist)|funktioniert nicht|geht nicht|klappt nicht|kacke|immer noch (nicht|falsch|kacke)|nicht gespeichert|nicht eingetragen|hat nicht geklappt)\b/i;
 const lfStamm = s => [...new Set(String(s).toLowerCase().replace(/ß/g, "ss").normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/[^a-z0-9]+/).filter(w => w.length >= 4).map(w => w.slice(0, 5)))];
@@ -93,7 +152,8 @@ module.exports = class JarvisVoice extends Plugin {
     const row = box.createDiv({ cls: "jv-row" });
     const inp = row.createEl("input", { cls: "jv-input", attr: { type: "text", placeholder: "…oder schreiben" } });
     const send = row.createEl("button", { cls: "jv-send", text: "➤" });
-    const v = { btn, st, out }; this.views.add(v);
+    const src = box.createDiv({ cls: "jv-src" });
+    const v = { btn, st, out, src }; this.views.add(v);
     btn.onclick = () => this.toggle();
     const go = () => { const t = inp.value.trim(); if (!t) return; inp.value = ""; this.ask(t, false); };
     send.onclick = go; inp.addEventListener("keydown", e => { if (e.key === "Enter") go(); });
@@ -130,11 +190,9 @@ module.exports = class JarvisVoice extends Plugin {
     return String(r.json.text || "").trim();
   }
 
-  async kontext(max = 24000) {
-    const files = this.app.vault.getMarkdownFiles(), prio = p => p.startsWith("00-") || p === "Start.md" ? 0 : p.startsWith("90-") ? 2 : 1;
-    files.sort((a, b) => prio(a.path) - prio(b.path) || a.path.localeCompare(b.path));
-    let out = ""; for (const f of files) { if (out.length > max) break; const t = (await this.app.vault.cachedRead(f)).replace(/<[^>]+>/g, " ").replace(/^---[\s\S]*?---\n/, "").replace(/\n{3,}/g, "\n\n").trim(); if (t) out += `\n\n=== ${f.path} ===\n${t.slice(0, 6000)}`; }
-    return out.slice(0, max);
+  async kontext(max = 24000, q) {
+    const docs = []; for (const f of this.app.vault.getMarkdownFiles()) { if (f.path.startsWith(".")) continue; try { docs.push({ p: f.path, t: await this.app.vault.cachedRead(f) }); } catch (e) { } }
+    const k = siKontext(docs, q || "", max); this.lastPfade = k.pfade; return k.text;
   }
 
   async wetter() {
@@ -148,7 +206,7 @@ module.exports = class JarvisVoice extends Plugin {
   async ki(q) {
     let wx = ""; if (/wetter|regen|schnee|sonne|temperatur|grad|warm|kalt|frost|glatt|wind|jacke|schirm|draußen/i.test(q)) { try { wx = "\n\n" + await this.wetter(); } catch (e) { wx = "\n\nWetterdienst gerade nicht erreichbar."; } }
     let lk = ""; try { const f = this.app.vault.getAbstractFileByPath("90-Claude/Lektionen.md"); const L = f ? lkAusText(await this.app.vault.cachedRead(f), q) : []; if (L.length) lk = "\n\nGelernte Lektionen aus früheren Fehlern (Hinweise – die Regeln oben gehen vor):\n" + L.map(l => `- ${l.id}: ${l.wd}`).join("\n"); } catch (e) { }
-    const baue = async max => SYS + lk + `\n\nHeute: ${heute()}.${wx}\nWissensspeicher:${await this.kontext(max)}`;
+    const baue = async max => SYS + lk + `\n\nHeute: ${heute()}.${wx}\nWissensspeicher:${await this.kontext(max, q)}`;
     const verlauf = this.hist.filter(h => Date.now() - h.t < 30 * 60e3).slice(-4).flatMap(h => [{ role: "user", content: h.q }, { role: "assistant", content: h.a }]);
     const msgs = [...verlauf, { role: "user", content: q }], fehler = [];
     if (this.cfg.claude) {
@@ -182,7 +240,13 @@ module.exports = class JarvisVoice extends Plugin {
       if (f) await v.process(f, s => s.replace(/\n*$/, "\n") + z + "\n"); else await v.create(P, "# Lernfälle aus Obsidian\n\nDer Telegram-Jarvis holt diese Zeilen ab und denkt nachts darüber nach.\n\n" + z + "\n"); } catch (e) { console.log("Jarvis Lernfall:", e); }
   }
 
+  quellen(L) {
+    for (const v of this.views) { v.src.empty(); if (!L || !L.length) continue; v.src.createSpan({ text: "📎 " });
+      L.forEach((p, i) => { if (i) v.src.createSpan({ text: " · " }); const a = v.src.createEl("a", { text: siTitel(p), cls: "jv-src-link", href: "#" }); a.onclick = e => { e.preventDefault(); this.app.workspace.openLinkText(p, "", false); }; }); }
+  }
+
   async ask(q, ton) {
+    this.quellen([]);
     { const last = this.hist.filter(h => Date.now() - h.t < 30 * 60e3).slice(-1)[0]; if (last && LF_KORR.test(q)) this.lernfall(last.q + " → " + last.a, "Korrektur: " + q); }
     this.ui("Denke nach …", "„" + q + "“", true);
     try {
@@ -191,6 +255,7 @@ module.exports = class JarvisVoice extends Plugin {
       let text = r.text.replace(/^\s*AKTION:.*$/gim, "").trim(); const done = [];
       for (const [w, t] of akts) { try { await this.aktion(w, t); done.push(w === "buch" ? "📚 Buch wird geprüft – Antwort kommt in Telegram" : w === "erinnerung" ? "⏰ Erinnerung kommt per Telegram" : w === "termin" ? "📅 Termin geht in ~2 Min. in deinen Kalender" : w === "fokus" ? "🎯 Fokus gesetzt" : w === "idee" ? "💡 Idee gespeichert" : "📥 Notiz im Eingang"); } catch (e) { done.push("⚠️ " + e.message); } }
       const fehl = done.filter(x => x.startsWith("⚠️")); if (fehl.length) { text = (text ? text + "\n\n" : "") + fehl.join("\n"); this.lernfall(q, fehl.join(" ")); }
+      const sq = siQuellen(text, this.lastPfade || []); text = sq.text; this.quellen(sq.quellen);
       this.hist.push({ q, a: text || "(festgehalten)", t: Date.now() }); if (this.hist.length > 8) this.hist.shift();
       this.ui("v" + this.manifest.version + " · " + r.via + (done.length ? " · " + done.join(" · ") : ""), "„" + q + "“\n\n" + (text || done.join("\n")), false);
       if (ton && this.cfg.ton && text) await this.sprich(text);

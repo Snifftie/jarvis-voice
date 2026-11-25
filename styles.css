@@ -45,3 +45,8 @@
 .jt-dots i { width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,.2); }
 .jt-dots i.jt-on { width: 18px; border-radius: 4px; background: #8a4fff; }
 .jt-next { text-align: center; font-size: .75em; color: #7f8ab0; margin-top: 6px; }
+
+/* Quellen unter der Antwort (0.3.0) */
+.jv-src { margin-top: 6px; font-size: 0.85em; color: var(--text-muted); }
+.jv-src:empty { display: none; }
+.jv-src-link { color: var(--text-accent); text-decoration: none; }
