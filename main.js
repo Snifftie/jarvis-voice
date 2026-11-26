@@ -11,6 +11,8 @@ Grundlage ist Alex' Wissensspeicher (Notizen unten). Erfinde keine Fakten, Termi
 Du kannst in den Wissensspeicher schreiben. Hänge dafür ans ENDE eine oder mehrere eigene Zeilen:
 AKTION: notiz | <Text>   (Notiz in den Eingang)
 AKTION: idee | <Text>    (Idee in den Ideen-Ordner)
+AKTION: wort | <richtig> | <falsch>   (Schreibweise merken)
+Korrigiert Alex eine Schreibweise oder einen Namen („Tonies, nicht Tonys“, „ich meinte …“, „das heißt …“) → AKTION wort | <richtig> | <falsch> (merkt es sich und korrigiert die heutigen Einträge). Schreibweisen aus dem Wörterbuch immer übernehmen.
 AKTION: urlaub | <Alex oder Dani> | <von JJJJ-MM-TT> | <bis JJJJ-MM-TT> | <Urlaub, krank oder frei>   (Abwesenheit – ersetzt die Schichten in „Mein Tag“ und „Wir zwei“)
 Aussagen über Urlaub, Krankheit oder freie Tage („Ich habe Urlaub von morgen bis Sonntag“) sind IMMER AKTION urlaub – nie fokus, nie notiz.
 Aufgaben mit Zeitbezug – Dinge, die Alex TUN muss („nicht vergessen“, „muss noch“, „heute“, „morgen“, „am Freitag“) – sind KEINE Notiz: mit Uhrzeit → AKTION erinnerung, mit Tag ohne Uhrzeit → AKTION fokus für diesen Tag, sonst fokus für heute. Nur zeitlose Infos sind notiz.
@@ -107,6 +109,38 @@ function siQuellen(text, erlaubt) {
   return { text: t, quellen: ok.slice(0, 3) };
 }
 
+// ---------- Wörterbuch (Jarvis 1.5 / Plugin 0.4): richtige Schreibweisen für die Spracherkennung + automatische Korrektur ----------
+// Datei 90-Claude/Wörterbuch.md, Zeilen „- Tonies (nicht: Tonys, Tonis)“. Gleicher Code im Telegram-Jarvis und im Plugin.
+const WB_DATEI = "90-Claude/Wörterbuch.md";
+const WB_BASIS = "Claude, Grundschule Marklohe, Elisa, Lieschen, Klassenbesprechung, Dani, Claude Code, API, Anthropic, Groq, Obsidian, GitHub, Telegram, Jarvis, Cockpit, BioOffice, Bioladen, Weiling, Shelly, Hyperliquid, Kraken, Trading, MMBM, C2-Bot, TRADEWOOOW, Iggesen, Athen, Kosak, Marklohe, Nienburg, Fokus, Notiz, Idee, Eingang";
+const WB_KOPF = "# 📖 Wörterbuch\n\n[[Regeln|← Claude]]\n\nRichtige Schreibweisen für Jarvis' Spracherkennung. Jarvis trägt selbst ein, wenn du ihn korrigierst („Tonies, nicht Tonys“). Du kannst auch selbst Zeilen ergänzen: `- Richtig (nicht: falsch1, falsch2)`\n\n";
+function wbLesen(t) {
+  const out = [];
+  for (const m of String(t || "").matchAll(/^- ([^(\n]+?)\s*(?:\((?:nicht|statt):\s*([^)]*)\))?\s*$/gm)) { const r = m[1].trim(); if (!r || r.length > 40) continue; out.push({ richtig: r, falsch: (m[2] || "").split(",").map(x => x.trim()).filter(x => x && x.toLowerCase() !== r.toLowerCase()) }); }
+  return out;
+}
+function wbEsc(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+// falsche Schreibweisen als ganze Wörter ersetzen (Groß/klein egal)
+function wbKorrektur(text, wb) {
+  let t = String(text || "");
+  for (const w of wb) for (const f of w.falsch) t = t.replace(new RegExp(`(^|[^\\p{L}\\p{N}])${wbEsc(f)}(?=$|[^\\p{L}\\p{N}])`, "giu"), (_, a) => a + w.richtig);
+  return t;
+}
+function wbPrompt(wb) { const extra = wb.map(w => w.richtig).filter(r => !WB_BASIS.includes(r)); return ("Deutsch. Häufige Wörter: " + WB_BASIS + (extra.length ? ", " + extra.join(", ") : "") + ".").slice(0, 900); }
+// Zeile fürs Wörterbuch ergänzen (bestehende Zeile erweitern statt doppelt)
+function wbEintragen(t, richtig, falsch) {
+  const r = String(richtig || "").trim().slice(0, 40), f = String(falsch || "").split(",").map(x => x.trim()).filter(x => x && x.toLowerCase() !== r.toLowerCase());
+  if (!r) return null; let b = t || WB_KOPF; const L = b.split("\n"), i = L.findIndex(l => new RegExp(`^- ${wbEsc(r)}\\s*(\\(|$)`, "i").test(l));
+  if (i >= 0) { const alt = wbLesen(L[i])[0] || { falsch: [] }, alle = [...new Set([...alt.falsch, ...f])]; L[i] = `- ${r}${alle.length ? ` (nicht: ${alle.join(", ")})` : ""}`; return L.join("\n"); }
+  return b.replace(/\n*$/, "\n") + `- ${r}${f.length ? ` (nicht: ${f.join(", ")})` : ""}\n`;
+}
+// in Zeilen von heute/gestern (Zeitstempel _(TT.MM. …)_) die falsche Schreibweise nachträglich korrigieren
+function wbNachtraeglich(t, wb, jetzt) {
+  const d = new Date(new Date(jetzt || Date.now()).toLocaleString("en-US", { timeZone: "Europe/Berlin" })), tage = [0, 1].map(n => { const x = new Date(d.getTime() - n * 864e5); return `${x.getDate()}.${x.getMonth() + 1}.`; });
+  let n = 0; const out = String(t || "").split("\n").map(l => { const m = /_\((\d{1,2})\.(\d{1,2})\./.exec(l); if (!m || !tage.includes(`${+m[1]}.${+m[2]}.`)) return l; const k = wbKorrektur(l, wb); if (k !== l) n++; return k; }).join("\n");
+  return { t: out, n };
+}
+
 // Lernkreislauf (0.2.5): passende Lektionen aus 90-Claude/Lektionen.md (pflegt der Telegram-Jarvis) + Lernfälle an ihn melden
 const LF_KORR = /^\s*(nein|ne|nö|falsch|stimmt nicht|nicht richtig|quatsch|so nicht)\b|\b(ich (hab|habe)\b.{0,40}\bgesagt|ich meinte|meinte ich|du hast\b.{0,25}\b(falsch|vergessen|nicht)|warum (hast|machst|verbessert|kommt|ist)|funktioniert nicht|geht nicht|klappt nicht|kacke|immer noch (nicht|falsch|kacke)|nicht gespeichert|nicht eingetragen|hat nicht geklappt)\b/i;
 const lfStamm = s => [...new Set(String(s).toLowerCase().replace(/ß/g, "ss").normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/[^a-z0-9]+/).filter(w => w.length >= 4).map(w => w.slice(0, 5)))];
@@ -189,11 +223,13 @@ module.exports = class JarvisVoice extends Plugin {
 
   async stt(blob) {
     const ext = blob.type.includes("mp4") ? "m4a" : blob.type.includes("ogg") ? "ogg" : "webm";
-    const mp = multipart({ model: "whisper-large-v3", language: "de", temperature: "0", response_format: "json", prompt: "Deutsch. Häufige Wörter: Claude, Grundschule Marklohe, Elisa, Klassenbesprechung, Dani, Claude Code, API, API-Schlüssel, Anthropic, Groq, Gemini, Mistral, Obsidian, GitHub, Telegram, Jarvis, Cockpit, BioOffice, Bioladen, Weiling, Shelly, Hyperliquid, Kraken, Trading, MMBM, C2-Bot, TRADEWOOOW, Iggesen, Athen, Kosak, Marklohe, Nienburg, Fokus, Notiz, Idee, Eingang" + (this.cfg.woerter ? ", " + this.cfg.woerter : "") + "." }, { name: "sprache." + ext, type: blob.type.split(";")[0], data: await blob.arrayBuffer() });
+    const mp = multipart({ model: "whisper-large-v3", language: "de", temperature: "0", response_format: "json", prompt: wbPrompt(await this.wb()) + (this.cfg.woerter ? ", " + this.cfg.woerter : "") + "." }, { name: "sprache." + ext, type: blob.type.split(";")[0], data: await blob.arrayBuffer() });
     const r = await requestUrl({ url: "https://api.groq.com/openai/v1/audio/transcriptions", method: "POST", headers: { Authorization: "Bearer " + this.cfg.groq }, body: mp.body, contentType: mp.contentType, throw: false });
     if (r.status >= 300) throw new Error("Spracherkennung (Groq " + r.status + "): " + ((r.json && r.json.error && r.json.error.message) || r.text || "").slice(0, 120));
-    return String(r.json.text || "").trim();
+    return wbKorrektur(String(r.json.text || "").trim(), await this.wb());
   }
+
+  async wb() { try { const f = this.app.vault.getAbstractFileByPath(WB_DATEI); return f ? wbLesen(await this.app.vault.cachedRead(f)) : []; } catch (e) { return []; } }
 
   async kontext(max = 24000, q) {
     const docs = []; for (const f of this.app.vault.getMarkdownFiles()) { if (f.path.startsWith(".")) continue; try { docs.push({ p: f.path, t: await this.app.vault.cachedRead(f) }); } catch (e) { } }
@@ -211,6 +247,7 @@ module.exports = class JarvisVoice extends Plugin {
   async ki(q) {
     let wx = ""; if (/wetter|regen|schnee|sonne|temperatur|grad|warm|kalt|frost|glatt|wind|jacke|schirm|draußen/i.test(q)) { try { wx = "\n\n" + await this.wetter(); } catch (e) { wx = "\n\nWetterdienst gerade nicht erreichbar."; } }
     let lk = ""; try { const f = this.app.vault.getAbstractFileByPath("90-Claude/Lektionen.md"); const L = f ? lkAusText(await this.app.vault.cachedRead(f), q) : []; if (L.length) lk = "\n\nGelernte Lektionen aus früheren Fehlern (Hinweise – die Regeln oben gehen vor):\n" + L.map(l => `- ${l.id}: ${l.wd}`).join("\n"); } catch (e) { }
+    try { const wl = await this.wb(); if (wl.length) lk += "\n\nWörterbuch (richtige Schreibweisen): " + wl.map(w => w.richtig).join(", "); } catch (e) { }
     const baue = async max => SYS + lk + `\n\nHeute: ${heute()}.${wx}\nWissensspeicher:${await this.kontext(max, q)}`;
     const verlauf = this.hist.filter(h => Date.now() - h.t < 30 * 60e3).slice(-4).flatMap(h => [{ role: "user", content: h.q }, { role: "assistant", content: h.a }]);
     const msgs = [...verlauf, { role: "user", content: q }], fehler = [];
@@ -256,9 +293,9 @@ module.exports = class JarvisVoice extends Plugin {
     this.ui("Denke nach …", "„" + q + "“", true);
     try {
       const r = await this.ki(q);
-      const akts = [...r.text.matchAll(/^\s*AKTION:\s*(notizseite|notiz|idee|fokus|termin|erinnerung|buch|urlaub)\s*\|\s*(.+)$/gim)].map(m => [m[1].toLowerCase(), m[2].trim()]);
+      const akts = [...r.text.matchAll(/^\s*AKTION:\s*(notizseite|notiz|idee|fokus|termin|erinnerung|buch|urlaub|wort)\s*\|\s*(.+)$/gim)].map(m => [m[1].toLowerCase(), m[2].trim()]);
       let text = r.text.replace(/^\s*AKTION:.*$/gim, "").trim(); const done = [];
-      for (const [w, t] of akts) { try { await this.aktion(w, t); done.push(w === "buch" ? "📚 Buch wird geprüft – Antwort kommt in Telegram" : w === "erinnerung" ? "⏰ Erinnerung kommt per Telegram" : w === "termin" ? "📅 Termin geht in ~2 Min. in deinen Kalender" : w === "fokus" ? "🎯 Fokus gesetzt" : w === "urlaub" ? "🏖️ Abwesenheit eingetragen – Schichten werden ausgeblendet (dauert bis zu 15 Min.)" : w === "notizseite" ? "🗒️ In Notizen: " + t.split("|")[0].trim() : w === "idee" ? "💡 Idee gespeichert" : "📥 Notiz im Eingang"); } catch (e) { done.push("⚠️ " + e.message); } }
+      for (const [w, t] of akts) { try { await this.aktion(w, t); done.push(w === "buch" ? "📚 Buch wird geprüft – Antwort kommt in Telegram" : w === "erinnerung" ? "⏰ Erinnerung kommt per Telegram" : w === "termin" ? "📅 Termin geht in ~2 Min. in deinen Kalender" : w === "fokus" ? "🎯 Fokus gesetzt" : w === "wort" ? "📖 Schreibweise gemerkt: " + t.split("|")[0].trim() : w === "urlaub" ? "🏖️ Abwesenheit eingetragen – Schichten werden ausgeblendet (dauert bis zu 15 Min.)" : w === "notizseite" ? "🗒️ In Notizen: " + t.split("|")[0].trim() : w === "idee" ? "💡 Idee gespeichert" : "📥 Notiz im Eingang"); } catch (e) { done.push("⚠️ " + e.message); } }
       const fehl = done.filter(x => x.startsWith("⚠️")); if (fehl.length) { text = (text ? text + "\n\n" : "") + fehl.join("\n"); this.lernfall(q, fehl.join(" ")); }
       const sq = siQuellen(text, this.lastPfade || []); text = sq.text; this.quellen(sq.quellen);
       this.hist.push({ q, a: text || "(festgehalten)", t: Date.now() }); if (this.hist.length > 8) this.hist.shift();
@@ -294,6 +331,13 @@ module.exports = class JarvisVoice extends Plugin {
       const tf = v.getAbstractFileByPath("00-Cockpit/Termine-neu.md"), zl = "- " + t.replace(/\n+/g, " ");
       return tf ? v.process(tf, s => s.replace(/\n*$/, "\n") + zl + "\n") : v.create("00-Cockpit/Termine-neu.md", "# Termine-Warteschlange\n\n" + zl + "\n");
     }
+    if (w === "wort") {
+      const [r, ...f] = t.split("|").map(x => x.trim()); if (!r) throw new Error("Wort fehlt");
+      const wf = v.getAbstractFileByPath(WB_DATEI); if (wf) await v.process(wf, s => wbEintragen(s, r, f.join(",")) || s); else await v.create(WB_DATEI, wbEintragen(null, r, f.join(",")));
+      const wl = wbLesen(`- ${r} (nicht: ${f.join(",")})`); if (!wl.length || !wl[0].falsch.length) return;
+      for (const p of ["00-Eingang/Eingang.md", "60-Ideen/Übersicht.md", "00-Cockpit/Fokus.md", ...v.getMarkdownFiles().map(x => x.path).filter(x => x.startsWith("80-Notizen/"))]) { const zf = v.getAbstractFileByPath(p); if (zf) await v.process(zf, s => wbNachtraeglich(s, wl).t); }
+      return;
+    }
     if (w === "urlaub") {
       const [w0, von, b0, a0] = t.split("|").map(x => x.trim()), wer = /dani/i.test(w0) ? "Dani" : "Alex", bis = b0 || von, art = (a0 || "Urlaub").slice(0, 30);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(von || "") || !/^\d{4}-\d{2}-\d{2}$/.test(bis) || bis < von) throw new Error("Abwesenheit braucht Datum von/bis");
@@ -306,7 +350,7 @@ module.exports = class JarvisVoice extends Plugin {
       if (!thema || !text) throw new Error("Notiz braucht Thema und Text");
       if (!v.getAbstractFileByPath("80-Notizen")) await v.createFolder("80-Notizen").catch(() => { });
       const p = `80-Notizen/${thema}.md`, zz = `- ${text} _(${stamp()})_`, nf = v.getAbstractFileByPath(p);
-      if (!nf) { await v.create(p, `# ${thema}\n\n[[Übersicht|← Notizen]]\n\n${zz}\n`); const u = v.getAbstractFileByPath("80-Notizen/Übersicht.md");
+      if (!nf) { await v.create(p, `[[Übersicht|← Notizen]]\n\n${zz}\n`); const u = v.getAbstractFileByPath("80-Notizen/Übersicht.md");
         if (u) await v.process(u, s => s.includes(`[[${thema}]]`) ? s : s.replace(/\n*$/, "\n") + `- [[${thema}]]\n`); else await v.create("80-Notizen/Übersicht.md", `# 🗒️ Notizen\n\n[[Start|← Cockpit]]\n\nPersönliche Sammlungen – eine Seite pro Thema.\n\n- [[${thema}]]\n`); return; }
       const alt = await v.read(nf), norm = x => String(x).toLowerCase().replace(/_\(.*?\)_/g, "").replace(/^\s*-\s*/, "").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
       if (dpDoppelt(text, alt) || alt.split("\n").some(l => /^\s*- /.test(l) && norm(l) === norm(text))) throw new Error("♻️ Steht schon drin – nicht doppelt gespeichert");
