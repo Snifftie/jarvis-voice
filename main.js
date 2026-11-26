@@ -11,6 +11,7 @@ Grundlage ist Alex' Wissensspeicher (Notizen unten). Erfinde keine Fakten, Termi
 Du kannst in den Wissensspeicher schreiben. Hänge dafür ans ENDE eine oder mehrere eigene Zeilen:
 AKTION: notiz | <Text>   (Notiz in den Eingang)
 AKTION: idee | <Text>    (Idee in den Ideen-Ordner)
+Aufgaben mit Zeitbezug („nicht vergessen“, „muss noch“, „heute“, „morgen“, „am Freitag“) sind KEINE Notiz: mit Uhrzeit → AKTION erinnerung, mit Tag ohne Uhrzeit → AKTION fokus für diesen Tag, sonst fokus für heute. Nur zeitlose Infos sind notiz.
 AKTION: notizseite | <Thema> | <Text>   (persönliche Sammlung im Ordner Notizen, eine Seite pro Thema, z. B. AKTION: notizseite | Elisa Weihnachtsgeschenke | Schachbrett)
 Der Ideen-Ordner ist NUR für Ideen zu Projekten, Geschäft, Websites, Jarvis und Produkten. Persönliches – Geschenkideen, Listen, Wünsche, Dinge zu einer Person, Merkzettel zu einem Thema – ist IMMER AKTION notizseite mit kurzem Thema; führe eine bestehende Seite weiter, statt eine neue mit ähnlichem Namen anzulegen. Einzelnes ohne Thema → notiz (Eingang).
 AKTION: fokus | <heute|morgen|übermorgen> | <A>; <B>; <C>   (ersetzt den Fokus dieses Tages im Cockpit, höchstens 3 kurze Aufgaben)
