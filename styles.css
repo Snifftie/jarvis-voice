@@ -50,3 +50,6 @@
 .jv-src { margin-top: 6px; font-size: 0.85em; color: var(--text-muted); }
 .jv-src:empty { display: none; }
 .jv-src-link { color: var(--text-accent); text-decoration: none; }
+
+/* Abwesenheit im Widget (0.3.3) */
+.jt-chip.jt-u { background: linear-gradient(160deg, #3ad6c5, #1f9e9a); color: #04211f; }

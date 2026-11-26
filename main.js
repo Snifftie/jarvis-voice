@@ -11,7 +11,9 @@ Grundlage ist Alex' Wissensspeicher (Notizen unten). Erfinde keine Fakten, Termi
 Du kannst in den Wissensspeicher schreiben. Hänge dafür ans ENDE eine oder mehrere eigene Zeilen:
 AKTION: notiz | <Text>   (Notiz in den Eingang)
 AKTION: idee | <Text>    (Idee in den Ideen-Ordner)
-Aufgaben mit Zeitbezug („nicht vergessen“, „muss noch“, „heute“, „morgen“, „am Freitag“) sind KEINE Notiz: mit Uhrzeit → AKTION erinnerung, mit Tag ohne Uhrzeit → AKTION fokus für diesen Tag, sonst fokus für heute. Nur zeitlose Infos sind notiz.
+AKTION: urlaub | <Alex oder Dani> | <von JJJJ-MM-TT> | <bis JJJJ-MM-TT> | <Urlaub, krank oder frei>   (Abwesenheit – ersetzt die Schichten in „Mein Tag“ und „Wir zwei“)
+Aussagen über Urlaub, Krankheit oder freie Tage („Ich habe Urlaub von morgen bis Sonntag“) sind IMMER AKTION urlaub – nie fokus, nie notiz.
+Aufgaben mit Zeitbezug – Dinge, die Alex TUN muss („nicht vergessen“, „muss noch“, „heute“, „morgen“, „am Freitag“) – sind KEINE Notiz: mit Uhrzeit → AKTION erinnerung, mit Tag ohne Uhrzeit → AKTION fokus für diesen Tag, sonst fokus für heute. Nur zeitlose Infos sind notiz.
 AKTION: notizseite | <Thema> | <Text>   (persönliche Sammlung im Ordner Notizen, eine Seite pro Thema, z. B. AKTION: notizseite | Elisa Weihnachtsgeschenke | Schachbrett)
 Der Ideen-Ordner ist NUR für Ideen zu Projekten, Geschäft, Websites, Jarvis und Produkten. Persönliches – Geschenkideen, Listen, Wünsche, Dinge zu einer Person, Merkzettel zu einem Thema – ist IMMER AKTION notizseite mit kurzem Thema; führe eine bestehende Seite weiter, statt eine neue mit ähnlichem Namen anzulegen. Einzelnes ohne Thema → notiz (Eingang).
 AKTION: fokus | <heute|morgen|übermorgen> | <A>; <B>; <C>   (ersetzt den Fokus dieses Tages im Cockpit, höchstens 3 kurze Aufgaben)
@@ -254,9 +256,9 @@ module.exports = class JarvisVoice extends Plugin {
     this.ui("Denke nach …", "„" + q + "“", true);
     try {
       const r = await this.ki(q);
-      const akts = [...r.text.matchAll(/^\s*AKTION:\s*(notizseite|notiz|idee|fokus|termin|erinnerung|buch)\s*\|\s*(.+)$/gim)].map(m => [m[1].toLowerCase(), m[2].trim()]);
+      const akts = [...r.text.matchAll(/^\s*AKTION:\s*(notizseite|notiz|idee|fokus|termin|erinnerung|buch|urlaub)\s*\|\s*(.+)$/gim)].map(m => [m[1].toLowerCase(), m[2].trim()]);
       let text = r.text.replace(/^\s*AKTION:.*$/gim, "").trim(); const done = [];
-      for (const [w, t] of akts) { try { await this.aktion(w, t); done.push(w === "buch" ? "📚 Buch wird geprüft – Antwort kommt in Telegram" : w === "erinnerung" ? "⏰ Erinnerung kommt per Telegram" : w === "termin" ? "📅 Termin geht in ~2 Min. in deinen Kalender" : w === "fokus" ? "🎯 Fokus gesetzt" : w === "notizseite" ? "🗒️ In Notizen: " + t.split("|")[0].trim() : w === "idee" ? "💡 Idee gespeichert" : "📥 Notiz im Eingang"); } catch (e) { done.push("⚠️ " + e.message); } }
+      for (const [w, t] of akts) { try { await this.aktion(w, t); done.push(w === "buch" ? "📚 Buch wird geprüft – Antwort kommt in Telegram" : w === "erinnerung" ? "⏰ Erinnerung kommt per Telegram" : w === "termin" ? "📅 Termin geht in ~2 Min. in deinen Kalender" : w === "fokus" ? "🎯 Fokus gesetzt" : w === "urlaub" ? "🏖️ Abwesenheit eingetragen – Schichten werden ausgeblendet (dauert bis zu 15 Min.)" : w === "notizseite" ? "🗒️ In Notizen: " + t.split("|")[0].trim() : w === "idee" ? "💡 Idee gespeichert" : "📥 Notiz im Eingang"); } catch (e) { done.push("⚠️ " + e.message); } }
       const fehl = done.filter(x => x.startsWith("⚠️")); if (fehl.length) { text = (text ? text + "\n\n" : "") + fehl.join("\n"); this.lernfall(q, fehl.join(" ")); }
       const sq = siQuellen(text, this.lastPfade || []); text = sq.text; this.quellen(sq.quellen);
       this.hist.push({ q, a: text || "(festgehalten)", t: Date.now() }); if (this.hist.length > 8) this.hist.shift();
@@ -291,6 +293,13 @@ module.exports = class JarvisVoice extends Plugin {
       if (!/\|\s*\d{4}-\d{2}-\d{2}/.test(t)) throw new Error("Termin ohne Datum");
       const tf = v.getAbstractFileByPath("00-Cockpit/Termine-neu.md"), zl = "- " + t.replace(/\n+/g, " ");
       return tf ? v.process(tf, s => s.replace(/\n*$/, "\n") + zl + "\n") : v.create("00-Cockpit/Termine-neu.md", "# Termine-Warteschlange\n\n" + zl + "\n");
+    }
+    if (w === "urlaub") {
+      const [w0, von, b0, a0] = t.split("|").map(x => x.trim()), wer = /dani/i.test(w0) ? "Dani" : "Alex", bis = b0 || von, art = (a0 || "Urlaub").slice(0, 30);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(von || "") || !/^\d{4}-\d{2}-\d{2}$/.test(bis) || bis < von) throw new Error("Abwesenheit braucht Datum von/bis");
+      const zz = `- ${wer} · ${von}${bis !== von ? " bis " + bis : ""} · ${art}`, P = "00-Cockpit/Abwesenheit.md", af = v.getAbstractFileByPath(P);
+      if (!af) return v.create(P, "# 🏖️ Abwesenheit\n\n[[Start|← Cockpit]]\n\nUrlaub, krank, frei – ersetzt in „Mein Tag“ und „Wir zwei“ die Schichten bzw. Danis Ladentage.\n\n" + zz + "\n");
+      return v.process(af, s => s.split("\n").includes(zz) ? s : s.replace(/\n*$/, "\n") + zz + "\n");
     }
     if (w === "notizseite") {
       const [th, ...r] = t.split("|").map(x => x.trim()), thema = th.replace(/[\\/:*?"<>|#^[\]]/g, " ").replace(/\s+/g, " ").trim().slice(0, 60), text = r.join(" | ").replace(/\n+/g, " ").trim();
@@ -379,7 +388,7 @@ class MeinTag {
     // Tageskopf
     const kopf = card.createDiv({ cls: "jt-dayhead" }), dd = new Date(tag.k + "T12:00:00");
     kopf.createEl("b", { text: dd.toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long" }) });
-    if (tag.schicht) kopf.createSpan({ cls: "jt-chip " + (/Früh/.test(tag.schicht) ? "jt-f" : /Spät/.test(tag.schicht) ? "jt-s" : /Nacht/.test(tag.schicht) ? "jt-n" : "jt-grau"), text: tag.schicht });
+    if (tag.schicht) kopf.createSpan({ cls: "jt-chip " + (/Früh/.test(tag.schicht) ? "jt-f" : /Spät/.test(tag.schicht) ? "jt-s" : /Nacht/.test(tag.schicht) ? "jt-n" : /🏖️/.test(tag.schicht) ? "jt-u" : "jt-grau"), text: tag.schicht });
     if (tag.dani) kopf.createSpan({ cls: "jt-chip " + (/\?|frei/.test(tag.dani) ? "jt-grau" : "jt-g"), text: tag.dani });
     const termine = tag.items.filter(x => x.txt.startsWith("📅")), aufg = tag.items.filter(x => !x.txt.startsWith("📅"));
     const zeile = (box, x) => {
