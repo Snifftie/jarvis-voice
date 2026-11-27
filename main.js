@@ -254,7 +254,7 @@ module.exports = class JarvisVoice extends Plugin {
     if (this.cfg.claude) {
       const r = await requestUrl({ url: "https://api.anthropic.com/v1/messages", method: "POST", contentType: "application/json", throw: false,
         headers: { "x-api-key": this.cfg.claude, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-        body: JSON.stringify({ model: "claude-sonnet-5-5", max_tokens: 600, system: await baue(24000), messages: msgs, temperature: 0.4 }) });
+        body: JSON.stringify({ model: "claude-sonnet-5-5", max_tokens: 600, system: await baue(24000), messages: msgs }) });
       if (r.status < 300) return { text: r.json.content.filter(x => x.type === "text").map(x => x.text).join("").trim(), via: "Claude" };
       fehler.push("Claude " + r.status); new Notice("Claude-Fehler " + r.status + " – nehme Groq");
     }
@@ -274,7 +274,7 @@ module.exports = class JarvisVoice extends Plugin {
       }
       if (!zuGross) break;
     }
-    throw new Error("Keine KI erreichbar (" + fehler.slice(-4).join(", ") + ").");
+    throw new Error("Keine KI erreichbar (" + fehler.slice(-4).join(", ") + ")." + (this.cfg.claude ? "" : " Tipp: Claude-Schlüssel eintragen (Einstellungen → Jarvis Voice), dann gibt es keine Gratis-Limits mehr."));
   }
 
   async lernfall(frage, signal) {
