@@ -21,6 +21,7 @@ const REGELN = `Speichern: Hänge ans Ende deiner Antwort eigene Zeilen in genau
   AKTION: fokus | <heute|morgen|übermorgen> | <A>; <B>; <C>   (ersetzt den Fokus dieses Tages im Cockpit, höchstens 3 kurze Aufgaben)
   AKTION: termin | <Titel> | <Start JJJJ-MM-TTTHH:MM oder JJJJ-MM-TT für ganztägig> | <Dauer in Minuten, Standard 60>   (trägt in Alex' Google Kalender ein)
   AKTION: termin_weg | <JJJJ-MM-TT> | <Titel wie im Kalender>   (Termin löschen – Jarvis fragt vorher in Telegram mit Knopf nach)
+  AKTION: termin_verschieben | <bisheriges Datum JJJJ-MM-TT> | <Titel wie im Kalender> | <neuer Start JJJJ-MM-TTTHH:MM oder JJJJ-MM-TT>   (Termin verschieben, Dauer bleibt)
   AKTION: erinnerung | <JJJJ-MM-TT>T<HH:MM> | <Text>   z. B. AKTION: erinnerung | 2026-11-25T17:30 | Elisa bei Sophia abholen   (Jarvis meldet sich genau dann in Telegram)
   AKTION: urlaub | <Alex oder Dani> | <von JJJJ-MM-TT> | <bis JJJJ-MM-TT> | <Urlaub, krank oder frei>   (Abwesenheit – ersetzt die Schichten in „Mein Tag“ und „Wir zwei“)
   AKTION: buch | <Titel – Autor (falls genannt)>   (Buchwunsch auf die Liste Buchwünsche)
@@ -28,7 +29,7 @@ const REGELN = `Speichern: Hänge ans Ende deiner Antwort eigene Zeilen in genau
 
 Was wohin gehört:
 - Speichere, wenn Alex etwas plant, sich vornimmt, notieren oder merken will. Übernimm nur, was er selbst gesagt hat, eine Zeile pro Gedanke, nichts doppelt.
-- Will Alex einen Termin absagen oder löschen („lösch den Zahnarzt am Mittwoch“, „Pokern fällt aus“) → termin_weg mit Datum und Titel aus Kalender.md; den Titel so nehmen, wie er dort steht. Sag nur, dass du nachfragst – gelöscht ist erst nach seinem Knopfdruck.
+- Will Alex einen Termin absagen oder löschen („lösch den Zahnarzt am Mittwoch“, „Pokern fällt aus“) → termin_weg mit Datum und Titel aus Kalender.md; den Titel so nehmen, wie er dort steht. Sag nur, dass du nachfragst – gelöscht ist erst nach seinem Knopfdruck. Will er einen Termin verlegen („Zahnarzt auf Donnerstag 9 Uhr“) → termin_verschieben; fehlt die neue Uhrzeit bei einem Termin mit Uhrzeit, frag nach.
 - Termin = Ereignis oder Verabredung zu einer Zeit, oft mit Ort oder anderen Personen („30.11. Pokern bei Marco, 11.30“, „Mittwoch Zahnarzt 10 Uhr“) → termin, Zusatzinfos (z. B. „Pizza mitbringen“) in den Titel. Wochentage vom heutigen Datum aus rechnen. Fehlt bei einem Termin die Uhrzeit, frag nach. Alex' Termine stehen in 00-Cockpit/Kalender.md.
 - Aufgabe = etwas, das Alex selbst erledigen muss („muss noch“, „nicht vergessen“, „Freitag Reifen wechseln“) → mit Uhrzeit erinnerung, mit Tag ohne Uhrzeit fokus für diesen Tag (heute/morgen/übermorgen), ohne Tag fokus für heute. Plant er den nächsten Tag, fokus | morgen.
 - „Erinnere mich …“, „sag mir Bescheid …“ mit Zeitpunkt → erinnerung, eine Zeile pro Zeitpunkt. Bei unklarer Uhrzeit (z. B. 4:15 nachts statt 14:15) nachfragen. Will Alex an einen Termin erinnert werden: termin und erinnerung. Erinnerungstexte ohne Vorsilbe „Erinnerung:“, dafür mit Anlass und ggf. Uhrzeit.
@@ -37,7 +38,7 @@ Was wohin gehört:
 - Buchwünsche („Buchwunsch …“, „das Buch will ich lesen …“) → buch, ein Buch pro Zeile, Titel richtig geschrieben, Autor nur wenn genannt. Das Buch wird danach automatisch in einer Bücher-Datenbank geprüft – sag deshalb nur, dass du es prüfst (die Antwort kommt in Telegram), nicht dass es eingetragen ist.
 - Korrigiert Alex eine Schreibweise oder einen Namen („Tonies, nicht Tonys“, „ich meinte …“) → wort; damit werden auch die heutigen Einträge korrigiert. Schreibweisen aus dem Wörterbuch übernehmen.
 - Schreib Gespeichertes in korrektem Deutsch: abgeschnittene Wortenden ergänzen („Grundschul-Marklohe“ = „Grundschule Marklohe“), Bindestriche und Großschreibung korrigieren, Füllwörter weglassen.`;
-const JR_DATEI = "90-Claude/Jarvis-Regeln.md", JR_FORMATE = ["notiz", "notizseite", "idee", "fokus", "termin", "termin_weg", "erinnerung", "urlaub", "buch", "wort"];
+const JR_DATEI = "90-Claude/Jarvis-Regeln.md", JR_FORMATE = ["notiz", "notizseite", "idee", "fokus", "termin", "termin_weg", "termin_verschieben", "erinnerung", "urlaub", "buch", "wort"];
 function jrPruefen(t) { const i = String(t || "").indexOf("## Regeln"); if (i < 0) return null; const r = t.slice(i + 9).trim(); return JR_FORMATE.every(a => r.includes("AKTION: " + a + " |")) ? r : null; }
 
 function stamp() { const d = new Date(); const p = n => String(n).padStart(2, "0"); return `${p(d.getDate())}.${p(d.getMonth() + 1)}. ${p(d.getHours())}:${p(d.getMinutes())}`; }
@@ -306,9 +307,9 @@ module.exports = class JarvisVoice extends Plugin {
     this.ui("Denke nach …", "„" + q + "“", true);
     try {
       const r = await this.ki(q);
-      const akts = [...r.text.matchAll(/^\s*AKTION:\s*(notizseite|notiz|idee|fokus|termin_weg|termin|erinnerung|buch|urlaub|wort)\s*\|\s*(.+)$/gim)].map(m => [m[1].toLowerCase(), m[2].trim()]);
+      const akts = [...r.text.matchAll(/^\s*AKTION:\s*(notizseite|notiz|idee|fokus|termin_weg|termin_verschieben|termin|erinnerung|buch|urlaub|wort)\s*\|\s*(.+)$/gim)].map(m => [m[1].toLowerCase(), m[2].trim()]);
       let text = r.text.replace(/^\s*AKTION:.*$/gim, "").trim(); const done = [];
-      for (const [w, t] of akts) { try { await this.aktion(w, t); done.push(w === "termin_weg" ? "🗑 Löschen bitte in Telegram bestätigen" : w === "buch" ? "📚 Buch wird geprüft – Antwort kommt in Telegram" : w === "erinnerung" ? "⏰ Erinnerung kommt per Telegram" : w === "termin" ? "📅 Termin geht in ~2 Min. in deinen Kalender" : w === "fokus" ? "🎯 Fokus gesetzt" : w === "wort" ? "📖 Schreibweise gemerkt: " + t.split("|")[0].trim() : w === "urlaub" ? "🏖️ Abwesenheit eingetragen – Schichten werden ausgeblendet (dauert bis zu 15 Min.)" : w === "notizseite" ? "🗒️ In Notizen: " + t.split("|")[0].trim() : w === "idee" ? "💡 Idee gespeichert" : "📥 Notiz im Eingang"); } catch (e) { done.push("⚠️ " + e.message); } }
+      for (const [w, t] of akts) { try { await this.aktion(w, t); done.push(w === "termin_weg" ? "🗑 Löschen bitte in Telegram bestätigen" : w === "termin_verschieben" ? "📅 Wird in ~2 Min. verschoben – Meldung kommt in Telegram" : w === "buch" ? "📚 Buch wird geprüft – Antwort kommt in Telegram" : w === "erinnerung" ? "⏰ Erinnerung kommt per Telegram" : w === "termin" ? "📅 Termin geht in ~2 Min. in deinen Kalender" : w === "fokus" ? "🎯 Fokus gesetzt" : w === "wort" ? "📖 Schreibweise gemerkt: " + t.split("|")[0].trim() : w === "urlaub" ? "🏖️ Abwesenheit eingetragen – Schichten werden ausgeblendet (dauert bis zu 15 Min.)" : w === "notizseite" ? "🗒️ In Notizen: " + t.split("|")[0].trim() : w === "idee" ? "💡 Idee gespeichert" : "📥 Notiz im Eingang"); } catch (e) { done.push("⚠️ " + e.message); } }
       const fehl = done.filter(x => x.startsWith("⚠️")); if (fehl.length) { text = (text ? text + "\n\n" : "") + fehl.join("\n"); this.lernfall(q, fehl.join(" ")); }
       const sq = siQuellen(text, this.lastPfade || []); text = sq.text; this.quellen(sq.quellen);
       this.hist.push({ q, a: text || "(festgehalten)", t: Date.now() }); if (this.hist.length > 8) this.hist.shift();
@@ -338,6 +339,11 @@ module.exports = class JarvisVoice extends Plugin {
       const z = erLesen(t); if (!z) throw new Error("Erinnerung NICHT gespeichert – keine Uhrzeit erkannt. Sag sie bitte noch mal mit Uhrzeit.");
       const ef = v.getAbstractFileByPath("00-Cockpit/Erinnerungen-neu.md"), el = "- " + z.at + " | " + z.text.replace(/\n+/g, " ");
       return ef ? v.process(ef, s => s.replace(/\n*$/, "\n") + el + "\n") : v.create("00-Cockpit/Erinnerungen-neu.md", "# Erinnerungs-Warteschlange\n\nDer Telegram-Jarvis holt diese Zeilen ab und meldet sich zur Zeit.\n\n" + el + "\n");
+    }
+    if (w === "termin_verschieben") { // gleiche Warteschlange wie Löschen; Jarvis verschiebt und meldet in Telegram
+      if (!/^\s*\d{4}-\d{2}-\d{2}\s*\|/.test(t)) throw new Error("Verschieben ohne Datum");
+      const P = "00-Cockpit/Termine-weg.md", wf = v.getAbstractFileByPath(P), zl = "- verschieben | " + t.replace(/\n+/g, " ");
+      return wf ? v.process(wf, s => s.replace(/\n*$/, "\n") + zl + "\n") : v.create(P, "# Termine löschen/verschieben (Warteschlange)\n\nJarvis übernimmt jede Zeile und entfernt sie dann.\n\n" + zl + "\n");
     }
     if (w === "termin_weg") { // Jarvis sucht den Termin und fragt in Telegram mit Knöpfen nach (Löschen ist endgültig)
       if (!/^\s*\d{4}-\d{2}-\d{2}\s*\|/.test(t)) throw new Error("Löschwunsch ohne Datum");
