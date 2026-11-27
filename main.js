@@ -156,6 +156,8 @@ function lkAusText(t, q, max = 5) {
   while ((m = re.exec(teil))) { if (m[4] === "claude") continue; const s = m[3].split(/\s+/).map(x => lfStamm(x)[0] || x.slice(0, 5)).filter(x => a.includes(x)).length; if (s) L.push({ id: m[1], wd: m[2], s }); }
   return L.sort((x, y) => y.s - x.s).slice(0, max);
 }
+// Nächste 14 Tage mit Wochentag – die KI soll Wochentage nicht selbst ausrechnen (Fehler 27.11.: „Montag“ wurde Samstag)
+function tage() { const d = new Date(), p = n => String(n).padStart(2, "0"); return "Kalender ab heute: " + Array.from({ length: 14 }, (_, i) => { const t = new Date(d.getFullYear(), d.getMonth(), d.getDate() + i, 12); return t.toLocaleString("de-DE", { weekday: "short" }) + ` ${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())}`; }).join(" · "); }
 function heute() { const d = new Date(), p = n => String(n).padStart(2, "0"); return d.toLocaleString("de-DE", { weekday: "long" }) + ` ${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}, ${p(d.getHours())}:${p(d.getMinutes())} Uhr`; }
 
 function multipart(fields, file) {
@@ -256,7 +258,7 @@ module.exports = class JarvisVoice extends Plugin {
     try { const wl = await this.wb(); if (wl.length) lk += "\n\nWörterbuch (richtige Schreibweisen): " + wl.map(w => w.richtig).join(", "); } catch (e) { }
     let regeln = REGELN; try { const f = this.app.vault.getAbstractFileByPath(JR_DATEI); const r = f ? jrPruefen(await this.app.vault.cachedRead(f)) : null; if (r) regeln = r; else if (f) new Notice("Jarvis: " + JR_DATEI + " unvollständig – nutze eingebaute Regeln"); } catch (e) { }
     const SYS = SYS_GRUND + "\n\n" + regeln;
-    const baue = async max => SYS + lk + `\n\nHeute: ${heute()}.${wx}\nWissensspeicher:${await this.kontext(max, q)}`;
+    const baue = async max => SYS + lk + `\n\nHeute: ${heute()}.\n${tage()}${wx}\nWissensspeicher:${await this.kontext(max, q)}`;
     const verlauf = this.hist.filter(h => Date.now() - h.t < 30 * 60e3).slice(-4).flatMap(h => [{ role: "user", content: h.q }, { role: "assistant", content: h.a }]);
     const msgs = [...verlauf, { role: "user", content: q }], fehler = [];
     if (this.cfg.claude) {
