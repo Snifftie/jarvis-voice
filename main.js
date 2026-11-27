@@ -6,19 +6,20 @@ const KEYS = ["groq", "claude", "gemini"];
 const DEF = { woerter: "", groq: "", claude: "", gemini: "", stimme: "Sulafat", ton: true, ttsModel: "gemini-3.1-flash-tts-preview" };
 const STIMMEN = ["Sulafat", "Kore", "Puck", "Charon", "Fenrir", "Aoede", "Leda", "Orus", "Zephyr", "Enceladus"];
 const SI_REGEL = "Schreib ganz am Ende eine eigene Zeile „QUELLEN: <Pfad>; <Pfad>“ mit höchstens 3 Notizen aus dem Kontext, auf die sich deine Antwort wirklich stützt (genau die Pfade aus den === Zeilen). Hast du keine Notiz gebraucht, schreib „QUELLEN: –“.";
-const SYS = `Du bist JARVIS, der persönliche Assistent von Alex. Du antwortest gesprochen, also natürlich, locker und kurz (meist 1–4 Sätze, keine Listen, keine Tabellen, keine Emojis, keine Überschriften). Deutsch, Du-Form.
+const SYS_GRUND = `Du bist JARVIS, der persönliche Assistent von Alex. Du antwortest gesprochen, also natürlich, locker und kurz (meist 1–4 Sätze, keine Listen, keine Tabellen, keine Emojis, keine Überschriften). Deutsch, Du-Form.
 
 Grundsätze:
 - Grundlage ist Alex' Wissensspeicher (Notizen unten). Erfinde keine Fakten, Termine, Zahlen oder Aufgaben; steht etwas nicht in den Notizen, sag das kurz.
 - Die Frage kommt aus der Spracherkennung und kann Hörfehler enthalten: offensichtliche Fehler anhand der Notizen und Fachwörter korrigieren, bevor du antwortest oder etwas speicherst (z. B. „Cloud Quote ABI“ = „Claude Code API“, „Bio Office“ = „BioOffice“). Ist etwas wirklich unklar, frag kurz nach.
-- Keine Kauf-/Verkaufsempfehlungen beim Trading.
-
-Speichern: Hänge ans Ende deiner Antwort eigene Zeilen in genau diesem Format (sie werden nicht vorgelesen – sag davor kurz, was du festgehalten hast):
+- Keine Kauf-/Verkaufsempfehlungen beim Trading.`;
+// Gemeinsame Regeln mit Jarvis (Telegram): Quelle ist 90-Claude/Jarvis-Regeln.md im Tresor (ab 0.5.0). Eingebauter Ersatz, falls die Datei fehlt
+// oder ein AKTION-Format fehlt (der Code liest diese Formate ein).
+const REGELN = `Speichern: Hänge ans Ende deiner Antwort eigene Zeilen in genau diesem Format (Alex sieht oder hört sie nicht – sag davor kurz in normalen Worten, was du festgehalten hast):
   AKTION: notiz | <Text>   (zeitlose Info in den Eingang)
   AKTION: notizseite | <Thema> | <Text>   (persönliche Sammlung im Ordner Notizen, eine Seite pro Thema, z. B. Elisa Weihnachtsgeschenke | Schachbrett)
   AKTION: idee | <Text>   (Idee in den Ideen-Ordner)
   AKTION: fokus | <heute|morgen|übermorgen> | <A>; <B>; <C>   (ersetzt den Fokus dieses Tages im Cockpit, höchstens 3 kurze Aufgaben)
-  AKTION: termin | <Titel> | <Start JJJJ-MM-TTTHH:MM oder JJJJ-MM-TT für ganztägig> | <Dauer in Minuten, Standard 60>   (Google Kalender)
+  AKTION: termin | <Titel> | <Start JJJJ-MM-TTTHH:MM oder JJJJ-MM-TT für ganztägig> | <Dauer in Minuten, Standard 60>   (trägt in Alex' Google Kalender ein)
   AKTION: erinnerung | <JJJJ-MM-TT>T<HH:MM> | <Text>   z. B. AKTION: erinnerung | 2026-11-25T17:30 | Elisa bei Sophia abholen   (Jarvis meldet sich genau dann in Telegram)
   AKTION: urlaub | <Alex oder Dani> | <von JJJJ-MM-TT> | <bis JJJJ-MM-TT> | <Urlaub, krank oder frei>   (Abwesenheit – ersetzt die Schichten in „Mein Tag“ und „Wir zwei“)
   AKTION: buch | <Titel – Autor (falls genannt)>   (Buchwunsch auf die Liste Buchwünsche)
@@ -26,15 +27,16 @@ Speichern: Hänge ans Ende deiner Antwort eigene Zeilen in genau diesem Format (
 
 Was wohin gehört:
 - Speichere, wenn Alex etwas plant, sich vornimmt, notieren oder merken will. Übernimm nur, was er selbst gesagt hat, eine Zeile pro Gedanke, nichts doppelt.
-- Termin = Ereignis oder Verabredung zu einer Zeit, oft mit Ort oder anderen Personen („30.11. Pokern bei Marco, 11.30“, „Mittwoch Zahnarzt 10 Uhr“) → termin, Zusatzinfos (z. B. „Pizza mitbringen“) in den Titel. Wochentage vom heutigen Datum aus rechnen. Fehlt bei einem Termin die Uhrzeit, frag nach.
-- Aufgabe = etwas, das Alex selbst erledigen muss („muss noch“, „nicht vergessen“, „Freitag Reifen wechseln“) → mit Uhrzeit erinnerung, mit Tag ohne Uhrzeit fokus für diesen Tag (heute/morgen/übermorgen), ohne Tag fokus für heute.
+- Termin = Ereignis oder Verabredung zu einer Zeit, oft mit Ort oder anderen Personen („30.11. Pokern bei Marco, 11.30“, „Mittwoch Zahnarzt 10 Uhr“) → termin, Zusatzinfos (z. B. „Pizza mitbringen“) in den Titel. Wochentage vom heutigen Datum aus rechnen. Fehlt bei einem Termin die Uhrzeit, frag nach. Alex' Termine stehen in 00-Cockpit/Kalender.md.
+- Aufgabe = etwas, das Alex selbst erledigen muss („muss noch“, „nicht vergessen“, „Freitag Reifen wechseln“) → mit Uhrzeit erinnerung, mit Tag ohne Uhrzeit fokus für diesen Tag (heute/morgen/übermorgen), ohne Tag fokus für heute. Plant er den nächsten Tag, fokus | morgen.
 - „Erinnere mich …“, „sag mir Bescheid …“ mit Zeitpunkt → erinnerung, eine Zeile pro Zeitpunkt. Bei unklarer Uhrzeit (z. B. 4:15 nachts statt 14:15) nachfragen. Will Alex an einen Termin erinnert werden: termin und erinnerung. Erinnerungstexte ohne Vorsilbe „Erinnerung:“, dafür mit Anlass und ggf. Uhrzeit.
-- Urlaub, Krankheit oder freie Tage („Ich habe Urlaub von morgen bis Sonntag“) → urlaub. Das ist keine Aufgabe und keine Notiz, weil es die Schichtanzeige ersetzt.
-- Der Ideen-Ordner ist nur für Ideen zu Projekten, Geschäft, Websites, Jarvis und Produkten. Persönliches (Geschenkideen, Listen, Wünsche, Dinge zu einer Person, Merkzettel) → notizseite mit kurzem Thema; führe eine bestehende Seite weiter, statt eine ähnliche neu anzulegen. Einzelnes ohne Thema → notiz.
-- Buchwünsche → buch, ein Buch pro Zeile. Das Buch wird danach in einer Bücher-Datenbank geprüft – sag deshalb, dass du es prüfst und die Antwort in Telegram kommt.
+- Urlaub, Krankheit oder freie Tage („Ich habe Urlaub von morgen bis Sonntag“, „Dani ist krank“) → urlaub. Das ist keine Aufgabe und keine Notiz, weil es die Schichtanzeige ersetzt.
+- Der Ideen-Ordner ist nur für Ideen zu Projekten, Geschäft, Websites, Jarvis und Produkten. Persönliches (Geschenkideen, Listen, Wünsche, Dinge zu einer Person, Merkzettel) → notizseite mit kurzem Thema; führe eine bestehende Seite aus „Alle Notizen“ weiter, statt eine ähnliche neu anzulegen. Einzelnes ohne Thema → notiz.
+- Buchwünsche („Buchwunsch …“, „das Buch will ich lesen …“) → buch, ein Buch pro Zeile, Titel richtig geschrieben, Autor nur wenn genannt. Das Buch wird danach automatisch in einer Bücher-Datenbank geprüft – sag deshalb nur, dass du es prüfst (die Antwort kommt in Telegram), nicht dass es eingetragen ist.
 - Korrigiert Alex eine Schreibweise oder einen Namen („Tonies, nicht Tonys“, „ich meinte …“) → wort; damit werden auch die heutigen Einträge korrigiert. Schreibweisen aus dem Wörterbuch übernehmen.
-- Schreib Gespeichertes in korrektem Deutsch: abgeschnittene Wortenden ergänzen („Grundschul-Marklohe“ = „Grundschule Marklohe“), Bindestriche und Großschreibung korrigieren, Füllwörter weglassen.
-- Alex' Termine stehen in 00-Cockpit/Kalender.md.`;
+- Schreib Gespeichertes in korrektem Deutsch: abgeschnittene Wortenden ergänzen („Grundschul-Marklohe“ = „Grundschule Marklohe“), Bindestriche und Großschreibung korrigieren, Füllwörter weglassen.`;
+const JR_DATEI = "90-Claude/Jarvis-Regeln.md", JR_FORMATE = ["notiz", "notizseite", "idee", "fokus", "termin", "erinnerung", "urlaub", "buch", "wort"];
+function jrPruefen(t) { const i = String(t || "").indexOf("## Regeln"); if (i < 0) return null; const r = t.slice(i + 9).trim(); return JR_FORMATE.every(a => r.includes("AKTION: " + a + " |")) ? r : null; }
 
 function stamp() { const d = new Date(); const p = n => String(n).padStart(2, "0"); return `${p(d.getDate())}.${p(d.getMonth() + 1)}. ${p(d.getHours())}:${p(d.getMinutes())}`; }
 // Zeitpunkt einer Erinnerung tolerant lesen → "JJJJ-MM-TTTHH:MM" (Berliner Zeit). Akzeptiert ISO (mit Leerzeichen/Sekunden), 25.11.(2026) 17:30, heute/morgen/übermorgen 17:30, nur 17:30 / 17.30 / 17 Uhr.
@@ -236,7 +238,7 @@ module.exports = class JarvisVoice extends Plugin {
   async wb() { try { const f = this.app.vault.getAbstractFileByPath(WB_DATEI); return f ? wbLesen(await this.app.vault.cachedRead(f)) : []; } catch (e) { return []; } }
 
   async kontext(max = 24000, q) {
-    const docs = []; for (const f of this.app.vault.getMarkdownFiles()) { if (f.path.startsWith(".")) continue; try { docs.push({ p: f.path, t: await this.app.vault.cachedRead(f) }); } catch (e) { } }
+    const docs = []; for (const f of this.app.vault.getMarkdownFiles()) { if (f.path.startsWith(".") || f.path === JR_DATEI) continue; try { docs.push({ p: f.path, t: await this.app.vault.cachedRead(f) }); } catch (e) { } }
     const k = siKontext(docs, q || "", max); this.lastPfade = k.pfade; return k.text;
   }
 
@@ -252,6 +254,8 @@ module.exports = class JarvisVoice extends Plugin {
     let wx = ""; if (/wetter|regen|schnee|sonne|temperatur|grad|warm|kalt|frost|glatt|wind|jacke|schirm|draußen/i.test(q)) { try { wx = "\n\n" + await this.wetter(); } catch (e) { wx = "\n\nWetterdienst gerade nicht erreichbar."; } }
     let lk = ""; try { const f = this.app.vault.getAbstractFileByPath("90-Claude/Lektionen.md"); const L = f ? lkAusText(await this.app.vault.cachedRead(f), q) : []; if (L.length) lk = "\n\nGelernte Lektionen aus früheren Fehlern (Hinweise – die Regeln oben gehen vor):\n" + L.map(l => `- ${l.id}: ${l.wd}`).join("\n"); } catch (e) { }
     try { const wl = await this.wb(); if (wl.length) lk += "\n\nWörterbuch (richtige Schreibweisen): " + wl.map(w => w.richtig).join(", "); } catch (e) { }
+    let regeln = REGELN; try { const f = this.app.vault.getAbstractFileByPath(JR_DATEI); const r = f ? jrPruefen(await this.app.vault.cachedRead(f)) : null; if (r) regeln = r; else if (f) new Notice("Jarvis: " + JR_DATEI + " unvollständig – nutze eingebaute Regeln"); } catch (e) { }
+    const SYS = SYS_GRUND + "\n\n" + regeln;
     const baue = async max => SYS + lk + `\n\nHeute: ${heute()}.${wx}\nWissensspeicher:${await this.kontext(max, q)}`;
     const verlauf = this.hist.filter(h => Date.now() - h.t < 30 * 60e3).slice(-4).flatMap(h => [{ role: "user", content: h.q }, { role: "assistant", content: h.a }]);
     const msgs = [...verlauf, { role: "user", content: q }], fehler = [];
